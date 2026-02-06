@@ -126,7 +126,8 @@ struct tts_transformer_state {
     
     std::vector<uint8_t> compute_meta;
     
-    tts_kv_cache cache;
+    tts_kv_cache cache;           // Talker KV cache (28 layers)
+    tts_kv_cache code_pred_cache; // Code predictor KV cache (5 layers)
 };
 
 // TTS Transformer class
@@ -143,6 +144,12 @@ public:
     
     // Clear KV cache
     void clear_kv_cache();
+    
+    // Initialize code predictor KV cache (5 layers, max 16 context)
+    bool init_code_pred_kv_cache(int32_t n_ctx);
+    
+    // Clear code predictor KV cache
+    void clear_code_pred_kv_cache();
     
     // Forward pass for text tokens (prefill phase)
     // text_tokens: input text token IDs [n_tokens]
@@ -169,6 +176,11 @@ public:
     // output: logits for all 16 codebooks [16, code_pred_vocab_size]
     bool predict_codes(const float * hidden, const int32_t * prev_codes,
                        std::vector<float> & output);
+    
+    // Run code predictor autoregressively to generate 15 codes (codebooks 1-15)
+    // hidden: hidden states from talker [hidden_size]
+    // output: generated codes for codebooks 1-15 [15]
+    bool predict_codes_autoregressive(const float * hidden, std::vector<int32_t> & output);
     
     // Generate speech codes autoregressively
     // text_tokens: input text token IDs [n_tokens]
@@ -202,6 +214,11 @@ private:
     
     // Build computation graph for code predictor
     struct ggml_cgraph * build_code_pred_graph(int32_t n_prev_codes);
+    
+    // Build computation graph for single-step autoregressive code predictor
+    // n_past: number of tokens already in KV cache (0-14)
+    // generation_step: which codebook we're predicting (0-14)
+    struct ggml_cgraph * build_code_pred_step_graph(int32_t n_past, int32_t generation_step);
     
     // Parse hyperparameters from GGUF
     bool parse_config(struct gguf_context * ctx);
