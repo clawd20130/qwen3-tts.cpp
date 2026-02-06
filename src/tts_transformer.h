@@ -1,0 +1,229 @@
+#pragma once
+
+#include "ggml.h"
+#include "ggml-backend.h"
+#include "gguf.h"
+
+#include <string>
+#include <map>
+#include <vector>
+#include <memory>
+
+namespace qwen3_tts {
+
+#define QWEN3_TTS_MAX_NODES 16384
+
+// TTS Transformer configuration (Qwen2-based Talker)
+struct tts_transformer_config {
+    // Text embedding
+    int32_t text_vocab_size = 151936;
+    int32_t text_embd_dim = 2048;
+    
+    // Talker transformer
+    int32_t hidden_size = 1024;
+    int32_t n_layers = 28;
+    int32_t n_attention_heads = 16;
+    int32_t n_key_value_heads = 8;
+    int32_t intermediate_size = 3072;
+    int32_t head_dim = 128;
+    float rms_norm_eps = 1e-6f;
+    float rope_theta = 1000000.0f;
+    
+    // M-RoPE sections [time, freq, channel] = [24, 20, 20]
+    int32_t mrope_section[3] = {24, 20, 20};
+    
+    // Codec vocabulary
+    int32_t codec_vocab_size = 3072;  // talker.codec_embd/codec_head
+    int32_t n_codebooks = 16;
+    
+    // Code predictor
+    int32_t code_pred_layers = 5;
+    int32_t code_pred_vocab_size = 2048;  // Per-codebook vocab
+    
+    // Special codec tokens
+    int32_t codec_pad_id = 2148;
+    int32_t codec_bos_id = 2149;
+    int32_t codec_eos_id = 2150;
+};
+
+// Transformer layer weights
+struct transformer_layer {
+    struct ggml_tensor * attn_norm = nullptr;
+    
+    struct ggml_tensor * attn_q = nullptr;
+    struct ggml_tensor * attn_k = nullptr;
+    struct ggml_tensor * attn_v = nullptr;
+    struct ggml_tensor * attn_output = nullptr;
+    struct ggml_tensor * attn_q_norm = nullptr;
+    struct ggml_tensor * attn_k_norm = nullptr;
+    
+    struct ggml_tensor * ffn_norm = nullptr;
+    
+    struct ggml_tensor * ffn_gate = nullptr;
+    struct ggml_tensor * ffn_up = nullptr;
+    struct ggml_tensor * ffn_down = nullptr;
+};
+
+// TTS Transformer model weights
+struct tts_transformer_model {
+    tts_transformer_config config;
+    
+    // Text embedding and projection
+    struct ggml_tensor * text_embd = nullptr;      // [text_embd_dim, text_vocab_size]
+    struct ggml_tensor * text_proj_fc1 = nullptr;  // [text_embd_dim, text_embd_dim]
+    struct ggml_tensor * text_proj_fc1_bias = nullptr;
+    struct ggml_tensor * text_proj_fc2 = nullptr;  // [text_embd_dim, hidden_size]
+    struct ggml_tensor * text_proj_fc2_bias = nullptr;
+    
+    // Codec embedding (for autoregressive input)
+    struct ggml_tensor * codec_embd = nullptr;     // [hidden_size, codec_vocab_size]
+    
+    // Talker transformer layers
+    std::vector<transformer_layer> layers;
+    
+    // Final RMSNorm
+    struct ggml_tensor * output_norm = nullptr;    // [hidden_size]
+    
+    // Codec head (for first codebook prediction)
+    struct ggml_tensor * codec_head = nullptr;     // [hidden_size, codec_vocab_size]
+    
+    // Code predictor layers
+    std::vector<transformer_layer> code_pred_layers;
+    
+    // Code predictor per-codebook embeddings and heads (15 codebooks, 0 uses talker output)
+    std::vector<struct ggml_tensor *> code_pred_embd;  // [hidden_size, code_pred_vocab_size] x 15
+    std::vector<struct ggml_tensor *> code_pred_head;  // [hidden_size, code_pred_vocab_size] x 15
+    
+    // GGML context for tensor metadata
+    struct ggml_context * ctx = nullptr;
+    
+    // Backend buffer for weights
+    ggml_backend_buffer_t buffer = nullptr;
+    
+    // Tensor name to tensor mapping
+    std::map<std::string, struct ggml_tensor *> tensors;
+};
+
+// KV cache for autoregressive generation
+struct tts_kv_cache {
+    std::vector<struct ggml_tensor *> k_cache;
+    std::vector<struct ggml_tensor *> v_cache;
+    
+    struct ggml_context * ctx = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
+    
+    int32_t n_ctx = 0;
+    int32_t n_used = 0;
+    int32_t head_dim = 128;
+    int32_t n_kv_heads = 8;
+    int32_t n_layers = 28;
+};
+
+// TTS Transformer state
+struct tts_transformer_state {
+    ggml_backend_t backend = nullptr;
+    ggml_backend_sched_t sched = nullptr;
+    
+    std::vector<uint8_t> compute_meta;
+    
+    tts_kv_cache cache;
+};
+
+// TTS Transformer class
+class TTSTransformer {
+public:
+    TTSTransformer();
+    ~TTSTransformer();
+    
+    // Load model from GGUF file
+    bool load_model(const std::string & model_path);
+    
+    // Initialize KV cache
+    bool init_kv_cache(int32_t n_ctx);
+    
+    // Clear KV cache
+    void clear_kv_cache();
+    
+    // Forward pass for text tokens (prefill phase)
+    // text_tokens: input text token IDs [n_tokens]
+    // speaker_embd: speaker embedding [hidden_size] (optional, can be nullptr)
+    // n_past: number of tokens already in KV cache
+    // output: hidden states [n_tokens, hidden_size]
+    bool forward_text(const int32_t * text_tokens, int32_t n_tokens,
+                      const float * speaker_embd, int32_t n_past,
+                      std::vector<float> & output);
+    
+    // Forward pass for codec tokens (generation phase)
+    // codec_token: single codec token for first codebook
+    // n_past: number of tokens already in KV cache
+    // output: logits for next codec token [codec_vocab_size]
+    bool forward_codec(int32_t codec_token, int32_t n_past,
+                       std::vector<float> & output);
+    
+    // Get hidden states from last forward pass (for code predictor)
+    bool get_hidden_states(std::vector<float> & hidden) const;
+    
+    // Run code predictor to get all 16 codebook predictions
+    // hidden: hidden states from talker [hidden_size]
+    // prev_codes: previous codes for codebooks 1-15 (can be nullptr for first step)
+    // output: logits for all 16 codebooks [16, code_pred_vocab_size]
+    bool predict_codes(const float * hidden, const int32_t * prev_codes,
+                       std::vector<float> & output);
+    
+    // Generate speech codes autoregressively
+    // text_tokens: input text token IDs [n_tokens]
+    // speaker_embd: speaker embedding [hidden_size]
+    // max_len: maximum number of frames to generate
+    // output: generated speech codes [n_frames, n_codebooks]
+    bool generate(const int32_t * text_tokens, int32_t n_tokens,
+                  const float * speaker_embd, int32_t max_len,
+                  std::vector<int32_t> & output);
+    
+    const tts_transformer_config & get_config() const { return model_.config; }
+    
+    const std::string & get_error() const { return error_msg_; }
+    
+    // Legacy interface for compatibility
+    bool forward(const int32_t * tokens, int32_t n_tokens, int32_t n_past,
+                 std::vector<float> & output);
+    
+    bool forward_with_audio(const int32_t * tokens, int32_t n_tokens,
+                            const float * audio_embd, int32_t n_audio,
+                            int32_t audio_start_pos, int32_t n_past,
+                            std::vector<float> & output);
+    
+private:
+    // Build computation graph for text forward pass
+    struct ggml_cgraph * build_text_graph(int32_t n_tokens, int32_t n_past,
+                                          bool has_speaker_embd);
+    
+    // Build computation graph for codec forward pass
+    struct ggml_cgraph * build_codec_graph(int32_t n_past);
+    
+    // Build computation graph for code predictor
+    struct ggml_cgraph * build_code_pred_graph(int32_t n_prev_codes);
+    
+    // Parse hyperparameters from GGUF
+    bool parse_config(struct gguf_context * ctx);
+    
+    // Create tensor structures
+    bool create_tensors(struct gguf_context * ctx);
+    
+    // Load tensor data from file
+    bool load_tensor_data(const std::string & path, struct gguf_context * ctx);
+    
+    tts_transformer_model model_;
+    tts_transformer_state state_;
+    std::string error_msg_;
+    
+    // Cached hidden states from last forward pass
+    std::vector<float> last_hidden_;
+};
+
+// Free model resources
+void free_transformer_model(tts_transformer_model & model);
+
+// Free KV cache resources
+void free_tts_kv_cache(tts_kv_cache & cache);
+
+} // namespace qwen3_tts
