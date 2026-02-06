@@ -87,12 +87,15 @@ struct tts_transformer_model {
     // Codec head (for first codebook prediction)
     struct ggml_tensor * codec_head = nullptr;     // [hidden_size, codec_vocab_size]
     
-    // Code predictor layers
-    std::vector<transformer_layer> code_pred_layers;
-    
-    // Code predictor per-codebook embeddings and heads (15 codebooks, 0 uses talker output)
-    std::vector<struct ggml_tensor *> code_pred_embd;  // [hidden_size, code_pred_vocab_size] x 15
-    std::vector<struct ggml_tensor *> code_pred_head;  // [hidden_size, code_pred_vocab_size] x 15
+     // Code predictor layers
+     std::vector<transformer_layer> code_pred_layers;
+     
+     // Code predictor output norm (final RMS norm before lm_head)
+     struct ggml_tensor * code_pred_output_norm = nullptr;  // [hidden_size]
+     
+     // Code predictor per-codebook embeddings and heads (15 codebooks, 0 uses talker output)
+     std::vector<struct ggml_tensor *> code_pred_embd;  // [hidden_size, code_pred_vocab_size] x 15
+     std::vector<struct ggml_tensor *> code_pred_head;  // [hidden_size, code_pred_vocab_size] x 15
     
     // GGML context for tensor metadata
     struct ggml_context * ctx = nullptr;
@@ -179,8 +182,10 @@ public:
     
     // Run code predictor autoregressively to generate 15 codes (codebooks 1-15)
     // hidden: hidden states from talker [hidden_size]
+    // codebook_0_token: the codebook 0 token (used to create 2-token prefill input)
     // output: generated codes for codebooks 1-15 [15]
-    bool predict_codes_autoregressive(const float * hidden, std::vector<int32_t> & output);
+    bool predict_codes_autoregressive(const float * hidden, int32_t codebook_0_token, 
+                                       std::vector<int32_t> & output);
     
     // Generate speech codes autoregressively
     // text_tokens: input text token IDs [n_tokens]
@@ -219,6 +224,10 @@ private:
     // n_past: number of tokens already in KV cache (0-14)
     // generation_step: which codebook we're predicting (0-14)
     struct ggml_cgraph * build_code_pred_step_graph(int32_t n_past, int32_t generation_step);
+    
+    // Build computation graph for 2-token prefill of code predictor
+    // Processes [past_hidden, codec_embd(codebook_0_token)] together
+    struct ggml_cgraph * build_code_pred_prefill_graph();
     
     // Parse hyperparameters from GGUF
     bool parse_config(struct gguf_context * ctx);
