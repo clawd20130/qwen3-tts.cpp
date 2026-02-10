@@ -80,39 +80,135 @@ bool TTSTransformer::load_model(const std::string & model_path) {
 }
 
 bool TTSTransformer::parse_config(struct gguf_context * ctx) {
-    auto get_u32 = [&](const char * key, int32_t default_val) -> int32_t {
-        int64_t idx = gguf_find_key(ctx, key);
-        if (idx < 0) return default_val;
-        return (int32_t)gguf_get_val_u32(ctx, idx);
+    auto get_u32_any = [&](std::initializer_list<const char *> keys, int32_t default_val) -> int32_t {
+        for (const char * key : keys) {
+            int64_t idx = gguf_find_key(ctx, key);
+            if (idx >= 0) {
+                return (int32_t)gguf_get_val_u32(ctx, idx);
+            }
+        }
+        return default_val;
     };
     
-    auto get_f32 = [&](const char * key, float default_val) -> float {
-        int64_t idx = gguf_find_key(ctx, key);
-        if (idx < 0) return default_val;
-        return gguf_get_val_f32(ctx, idx);
+    auto get_f32_any = [&](std::initializer_list<const char *> keys, float default_val) -> float {
+        for (const char * key : keys) {
+            int64_t idx = gguf_find_key(ctx, key);
+            if (idx >= 0) {
+                return gguf_get_val_f32(ctx, idx);
+            }
+        }
+        return default_val;
     };
     
     auto & cfg = model_.config;
-    cfg.text_vocab_size = get_u32("qwen3-tts.text.vocab_size", 151936);
-    cfg.text_embd_dim = get_u32("qwen3-tts.text.embedding_dim", 2048);
-    cfg.hidden_size = get_u32("qwen3-tts.talker.embedding_length", 1024);
-    cfg.n_layers = get_u32("qwen3-tts.talker.block_count", 28);
-    cfg.n_attention_heads = get_u32("qwen3-tts.talker.attention.head_count", 16);
-    cfg.n_key_value_heads = get_u32("qwen3-tts.talker.attention.head_count_kv", 8);
-    cfg.intermediate_size = get_u32("qwen3-tts.talker.feed_forward_length", 3072);
-    cfg.head_dim = get_u32("qwen3-tts.talker.attention.key_length", 128);
-    cfg.rms_norm_eps = get_f32("qwen3-tts.talker.attention.layer_norm_rms_epsilon", 1e-6f);
-    cfg.rope_theta = get_f32("qwen3-tts.talker.rope.freq_base", 1000000.0f);
-    
-    cfg.codec_vocab_size = get_u32("qwen3-tts.talker.codec_vocab_size", 3072);
-    cfg.n_codebooks = get_u32("qwen3-tts.talker.num_codebooks", 16);
-    
-    cfg.code_pred_layers = get_u32("qwen3-tts.code_pred.layer_count", 5);
-    cfg.code_pred_vocab_size = get_u32("qwen3-tts.code_pred.vocab_size", 2048);
-    
-    cfg.codec_pad_id = get_u32("qwen3-tts.codec.pad_id", 2148);
-    cfg.codec_bos_id = get_u32("qwen3-tts.codec.bos_id", 2149);
-    cfg.codec_eos_id = get_u32("qwen3-tts.codec.eos_id", 2150);
+    cfg.text_vocab_size = get_u32_any({
+        "qwen3-tts.text.vocab_size",
+        "qwen3-tts.text_vocab_size",
+    }, 151936);
+    cfg.text_embd_dim = get_u32_any({
+        "qwen3-tts.text.embedding_dim",
+        "qwen3-tts.text_hidden_size",
+    }, 2048);
+    cfg.hidden_size = get_u32_any({
+        "qwen3-tts.talker.embedding_length",
+        "qwen3-tts.embedding_length",
+    }, 1024);
+    cfg.n_layers = get_u32_any({
+        "qwen3-tts.talker.block_count",
+        "qwen3-tts.block_count",
+    }, 28);
+    cfg.n_attention_heads = get_u32_any({
+        "qwen3-tts.talker.attention.head_count",
+        "qwen3-tts.attention.head_count",
+    }, 16);
+    cfg.n_key_value_heads = get_u32_any({
+        "qwen3-tts.talker.attention.head_count_kv",
+        "qwen3-tts.attention.head_count_kv",
+    }, 8);
+    cfg.intermediate_size = get_u32_any({
+        "qwen3-tts.talker.feed_forward_length",
+        "qwen3-tts.feed_forward_length",
+    }, 3072);
+    cfg.head_dim = get_u32_any({
+        "qwen3-tts.talker.attention.key_length",
+        "qwen3-tts.attention.key_length",
+    }, 128);
+    cfg.rms_norm_eps = get_f32_any({
+        "qwen3-tts.talker.attention.layer_norm_rms_epsilon",
+        "qwen3-tts.attention.layer_norm_rms_epsilon",
+    }, 1e-6f);
+    cfg.rope_theta = get_f32_any({
+        "qwen3-tts.talker.rope.freq_base",
+        "qwen3-tts.rope.freq_base",
+    }, 1000000.0f);
+
+    cfg.codec_vocab_size = get_u32_any({
+        "qwen3-tts.talker.codec_vocab_size",
+        "qwen3-tts.vocab_size",
+    }, 3072);
+    cfg.n_codebooks = get_u32_any({
+        "qwen3-tts.talker.num_codebooks",
+        "qwen3-tts.num_code_groups",
+    }, 16);
+
+    cfg.code_pred_layers = get_u32_any({
+        "qwen3-tts.code_pred.layer_count",
+        "qwen3-tts.code_predictor.layer_count",
+    }, 5);
+    cfg.code_pred_vocab_size = get_u32_any({
+        "qwen3-tts.code_pred.vocab_size",
+        "qwen3-tts.code_predictor.vocab_size",
+    }, 2048);
+
+    cfg.codec_pad_id = get_u32_any({
+        "qwen3-tts.codec.pad_id",
+    }, 2148);
+    cfg.codec_bos_id = get_u32_any({
+        "qwen3-tts.codec.bos_id",
+    }, 2149);
+    cfg.codec_eos_id = get_u32_any({
+        "qwen3-tts.codec.eos_id",
+        "qwen3-tts.codec.eos_token_id",
+    }, 2150);
+
+    cfg.tts_bos_token_id = get_u32_any({
+        "qwen3-tts.tts_bos_token_id",
+        "qwen3-tts.tts.bos_token_id",
+        "qwen3-tts.tts.bos_id",
+    }, 151672);
+    cfg.tts_eos_token_id = get_u32_any({
+        "qwen3-tts.tts_eos_token_id",
+        "qwen3-tts.tts.eos_token_id",
+        "qwen3-tts.tts.eos_id",
+    }, 151673);
+    cfg.tts_pad_token_id = get_u32_any({
+        "qwen3-tts.tts_pad_token_id",
+        "qwen3-tts.tts.pad_token_id",
+        "qwen3-tts.tts.pad_id",
+    }, 151671);
+
+    cfg.codec_think_id = get_u32_any({
+        "qwen3-tts.codec.think_id",
+        "qwen3-tts.codec_think_id",
+    }, 2154);
+    cfg.codec_nothink_id = get_u32_any({
+        "qwen3-tts.codec.nothink_id",
+        "qwen3-tts.codec_nothink_id",
+    }, 2155);
+    cfg.codec_think_bos_id = get_u32_any({
+        "qwen3-tts.codec.think_bos_id",
+        "qwen3-tts.codec_think_bos_id",
+    }, 2156);
+    cfg.codec_think_eos_id = get_u32_any({
+        "qwen3-tts.codec.think_eos_id",
+        "qwen3-tts.codec_think_eos_id",
+    }, 2157);
+
+    cfg.english_language_id = get_u32_any({
+        "qwen3-tts.language.english_id",
+        "qwen3-tts.codec.language.english_id",
+        "qwen3-tts.language_id",
+    }, 2050);
     
     return true;
 }
@@ -556,8 +652,282 @@ void TTSTransformer::clear_code_pred_kv_cache() {
     state_.code_pred_cache.n_used = 0;
 }
 
-struct ggml_cgraph * TTSTransformer::build_text_graph(int32_t n_tokens, int32_t n_past,
-                                                       bool has_speaker_embd) {
+bool TTSTransformer::lookup_embedding_rows(struct ggml_tensor * embedding, const int32_t * token_ids,
+                                           int32_t n_tokens, const char * input_name,
+                                           const char * output_name, std::vector<float> & output) {
+    if (!model_.ctx) {
+        error_msg_ = "Model not loaded";
+        return false;
+    }
+    if (!embedding) {
+        error_msg_ = "Embedding tensor not found";
+        return false;
+    }
+    if (n_tokens <= 0) {
+        output.clear();
+        return true;
+    }
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ state_.compute_meta.size(),
+        /*.mem_buffer =*/ state_.compute_meta.data(),
+        /*.no_alloc   =*/ true,
+    };
+
+    struct ggml_context * ctx0 = ggml_init(params);
+    struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, QWEN3_TTS_MAX_NODES, false);
+
+    struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
+    ggml_set_name(inp_tokens, input_name);
+    ggml_set_input(inp_tokens);
+
+    struct ggml_tensor * rows = ggml_get_rows(ctx0, embedding, inp_tokens);
+    rows = ggml_cast(ctx0, rows, GGML_TYPE_F32);
+    ggml_set_name(rows, output_name);
+    ggml_set_output(rows);
+
+    ggml_build_forward_expand(gf, rows);
+
+    if (!ggml_backend_sched_alloc_graph(state_.sched, gf)) {
+        error_msg_ = "Failed to allocate embedding lookup graph";
+        ggml_free(ctx0);
+        return false;
+    }
+
+    struct ggml_tensor * inp = ggml_graph_get_tensor(gf, input_name);
+    ggml_backend_tensor_set(inp, token_ids, 0, n_tokens * sizeof(int32_t));
+
+    if (ggml_backend_sched_graph_compute(state_.sched, gf) != GGML_STATUS_SUCCESS) {
+        error_msg_ = "Failed to compute embedding lookup graph";
+        ggml_backend_sched_reset(state_.sched);
+        ggml_free(ctx0);
+        return false;
+    }
+
+    struct ggml_tensor * out = ggml_graph_get_tensor(gf, output_name);
+    if (!out) {
+        error_msg_ = "Failed to find embedding lookup output tensor";
+        ggml_backend_sched_reset(state_.sched);
+        ggml_free(ctx0);
+        return false;
+    }
+
+    output.resize((size_t)embedding->ne[0] * n_tokens);
+    ggml_backend_tensor_get(out, output.data(), 0, output.size() * sizeof(float));
+
+    ggml_backend_sched_reset(state_.sched);
+    ggml_free(ctx0);
+    return true;
+}
+
+bool TTSTransformer::project_text_tokens(const int32_t * text_tokens, int32_t n_tokens,
+                                         std::vector<float> & output) {
+    if (!model_.ctx) {
+        error_msg_ = "Model not loaded";
+        return false;
+    }
+    if (n_tokens <= 0) {
+        output.clear();
+        return true;
+    }
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ state_.compute_meta.size(),
+        /*.mem_buffer =*/ state_.compute_meta.data(),
+        /*.no_alloc   =*/ true,
+    };
+
+    struct ggml_context * ctx0 = ggml_init(params);
+    struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, QWEN3_TTS_MAX_NODES, false);
+
+    struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
+    ggml_set_name(inp_tokens, "inp_text_tokens");
+    ggml_set_input(inp_tokens);
+
+    struct ggml_tensor * cur = ggml_get_rows(ctx0, model_.text_embd, inp_tokens);
+    cur = ggml_mul_mat(ctx0, model_.text_proj_fc1, cur);
+    cur = ggml_add(ctx0, cur, model_.text_proj_fc1_bias);
+    cur = ggml_silu(ctx0, cur);
+    cur = ggml_mul_mat(ctx0, model_.text_proj_fc2, cur);
+    cur = ggml_add(ctx0, cur, model_.text_proj_fc2_bias);
+
+    ggml_set_name(cur, "text_proj_out");
+    ggml_set_output(cur);
+    ggml_build_forward_expand(gf, cur);
+
+    if (!ggml_backend_sched_alloc_graph(state_.sched, gf)) {
+        error_msg_ = "Failed to allocate text projection graph";
+        ggml_free(ctx0);
+        return false;
+    }
+
+    struct ggml_tensor * inp = ggml_graph_get_tensor(gf, "inp_text_tokens");
+    ggml_backend_tensor_set(inp, text_tokens, 0, n_tokens * sizeof(int32_t));
+
+    if (ggml_backend_sched_graph_compute(state_.sched, gf) != GGML_STATUS_SUCCESS) {
+        error_msg_ = "Failed to compute text projection graph";
+        ggml_backend_sched_reset(state_.sched);
+        ggml_free(ctx0);
+        return false;
+    }
+
+    struct ggml_tensor * out = ggml_graph_get_tensor(gf, "text_proj_out");
+    if (!out) {
+        error_msg_ = "Failed to find text projection output tensor";
+        ggml_backend_sched_reset(state_.sched);
+        ggml_free(ctx0);
+        return false;
+    }
+
+    output.resize((size_t)model_.config.hidden_size * n_tokens);
+    ggml_backend_tensor_get(out, output.data(), 0, output.size() * sizeof(float));
+
+    ggml_backend_sched_reset(state_.sched);
+    ggml_free(ctx0);
+    return true;
+}
+
+bool TTSTransformer::build_prefill_graph(const int32_t * text_tokens, int32_t n_tokens,
+                                         const float * speaker_embd, int32_t language_id,
+                                         std::vector<float> & prefill_embd,
+                                         std::vector<float> & trailing_text_hidden,
+                                         std::vector<float> & tts_pad_embed) {
+    if (!text_tokens) {
+        error_msg_ = "text_tokens is null";
+        return false;
+    }
+    if (n_tokens < 4) {
+        error_msg_ = "Need at least 4 text tokens for prefill";
+        return false;
+    }
+
+    const auto & cfg = model_.config;
+    const int32_t hidden_size = cfg.hidden_size;
+
+    int32_t special_tokens[3] = {
+        cfg.tts_bos_token_id,
+        cfg.tts_eos_token_id,
+        cfg.tts_pad_token_id,
+    };
+
+    std::vector<float> special_proj;
+    if (!project_text_tokens(special_tokens, 3, special_proj)) {
+        return false;
+    }
+
+    std::vector<float> tts_bos_embed(hidden_size);
+    std::vector<float> tts_eos_embed(hidden_size);
+    tts_pad_embed.resize(hidden_size);
+    memcpy(tts_bos_embed.data(), special_proj.data() + 0 * hidden_size, hidden_size * sizeof(float));
+    memcpy(tts_eos_embed.data(), special_proj.data() + 1 * hidden_size, hidden_size * sizeof(float));
+    memcpy(tts_pad_embed.data(), special_proj.data() + 2 * hidden_size, hidden_size * sizeof(float));
+
+    std::vector<float> role_embed;
+    if (!project_text_tokens(text_tokens, 3, role_embed)) {
+        return false;
+    }
+
+    std::vector<int32_t> codec_prefill_tokens;
+    if (language_id < 0) {
+        codec_prefill_tokens = {
+            cfg.codec_nothink_id,
+            cfg.codec_think_bos_id,
+            cfg.codec_think_eos_id,
+        };
+    } else {
+        codec_prefill_tokens = {
+            cfg.codec_think_id,
+            cfg.codec_think_bos_id,
+            language_id,
+            cfg.codec_think_eos_id,
+        };
+    }
+
+    std::vector<float> codec_prefill_embed;
+    if (!lookup_embedding_rows(model_.codec_embd, codec_prefill_tokens.data(),
+                               (int32_t)codec_prefill_tokens.size(),
+                               "inp_codec_prefill_tokens", "codec_prefill_rows",
+                               codec_prefill_embed)) {
+        return false;
+    }
+
+    int32_t codec_tail_tokens[2] = { cfg.codec_pad_id, cfg.codec_bos_id };
+    std::vector<float> codec_tail_embed;
+    if (!lookup_embedding_rows(model_.codec_embd, codec_tail_tokens, 2,
+                               "inp_codec_tail_tokens", "codec_tail_rows",
+                               codec_tail_embed)) {
+        return false;
+    }
+
+    const bool has_speaker = (speaker_embd != nullptr);
+    const int32_t codec_input_len = (int32_t)codec_prefill_tokens.size() + (has_speaker ? 1 : 0) + 2;
+    std::vector<float> codec_input_embedding((size_t)codec_input_len * hidden_size);
+
+    int32_t dst_token = 0;
+    memcpy(codec_input_embedding.data(), codec_prefill_embed.data(), codec_prefill_embed.size() * sizeof(float));
+    dst_token += (int32_t)codec_prefill_tokens.size();
+
+    if (has_speaker) {
+        memcpy(codec_input_embedding.data() + (size_t)dst_token * hidden_size,
+               speaker_embd, hidden_size * sizeof(float));
+        ++dst_token;
+    }
+
+    memcpy(codec_input_embedding.data() + (size_t)dst_token * hidden_size,
+           codec_tail_embed.data(), codec_tail_embed.size() * sizeof(float));
+
+    const int32_t codec_plus_overlay_len = codec_input_len - 1;
+    std::vector<float> codec_plus_overlay((size_t)codec_plus_overlay_len * hidden_size);
+    for (int32_t t = 0; t < codec_plus_overlay_len; ++t) {
+        const float * overlay = (t == codec_plus_overlay_len - 1)
+            ? tts_bos_embed.data()
+            : tts_pad_embed.data();
+        const float * codec_row = codec_input_embedding.data() + (size_t)t * hidden_size;
+        float * out_row = codec_plus_overlay.data() + (size_t)t * hidden_size;
+        for (int32_t h = 0; h < hidden_size; ++h) {
+            out_row[h] = overlay[h] + codec_row[h];
+        }
+    }
+
+    std::vector<float> first_text_embed;
+    if (!project_text_tokens(text_tokens + 3, 1, first_text_embed)) {
+        return false;
+    }
+
+    std::vector<float> first_text_plus_codec_bos(hidden_size);
+    const float * codec_bos_embed = codec_input_embedding.data() + (size_t)(codec_input_len - 1) * hidden_size;
+    for (int32_t h = 0; h < hidden_size; ++h) {
+        first_text_plus_codec_bos[h] = first_text_embed[h] + codec_bos_embed[h];
+    }
+
+    const int32_t prefill_len = 3 + codec_plus_overlay_len + 1;
+    prefill_embd.resize((size_t)prefill_len * hidden_size);
+    memcpy(prefill_embd.data(), role_embed.data(), role_embed.size() * sizeof(float));
+    memcpy(prefill_embd.data() + (size_t)3 * hidden_size,
+           codec_plus_overlay.data(), codec_plus_overlay.size() * sizeof(float));
+    memcpy(prefill_embd.data() + (size_t)(prefill_len - 1) * hidden_size,
+           first_text_plus_codec_bos.data(), hidden_size * sizeof(float));
+
+    const int32_t trailing_token_count = std::max(0, n_tokens - 9);
+    std::vector<float> trailing_text_proj;
+    if (trailing_token_count > 0) {
+        if (!project_text_tokens(text_tokens + 4, trailing_token_count, trailing_text_proj)) {
+            return false;
+        }
+    }
+
+    const int32_t trailing_len = trailing_token_count + 1;
+    trailing_text_hidden.resize((size_t)trailing_len * hidden_size);
+    if (trailing_token_count > 0) {
+        memcpy(trailing_text_hidden.data(), trailing_text_proj.data(), trailing_text_proj.size() * sizeof(float));
+    }
+    memcpy(trailing_text_hidden.data() + (size_t)(trailing_len - 1) * hidden_size,
+           tts_eos_embed.data(), hidden_size * sizeof(float));
+
+    return true;
+}
+
+struct ggml_cgraph * TTSTransformer::build_prefill_forward_graph(int32_t n_tokens, int32_t n_past) {
     const auto & cfg = model_.config;
     const int n_head = cfg.n_attention_heads;
     const int n_kv_head = cfg.n_key_value_heads;
@@ -575,36 +945,16 @@ struct ggml_cgraph * TTSTransformer::build_text_graph(int32_t n_tokens, int32_t 
     
     struct ggml_context * ctx0 = ggml_init(params);
     struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, QWEN3_TTS_MAX_NODES, false);
-    
-    struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
-    ggml_set_name(inp_tokens, "inp_tokens");
-    ggml_set_input(inp_tokens);
+
+    struct ggml_tensor * inp_prefill_embd = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hidden_size, n_tokens);
+    ggml_set_name(inp_prefill_embd, "inp_prefill_embd");
+    ggml_set_input(inp_prefill_embd);
     
     struct ggml_tensor * inp_pos = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
     ggml_set_name(inp_pos, "inp_pos");
     ggml_set_input(inp_pos);
-    
-    struct ggml_tensor * inp_speaker = nullptr;
-    if (has_speaker_embd) {
-        inp_speaker = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, hidden_size);
-        ggml_set_name(inp_speaker, "inp_speaker");
-        ggml_set_input(inp_speaker);
-    }
-    
-    struct ggml_tensor * cur = ggml_get_rows(ctx0, model_.text_embd, inp_tokens);
-    
-    cur = ggml_mul_mat(ctx0, model_.text_proj_fc1, cur);
-    cur = ggml_add(ctx0, cur, model_.text_proj_fc1_bias);
-    cur = ggml_gelu(ctx0, cur);
-    cur = ggml_mul_mat(ctx0, model_.text_proj_fc2, cur);
-    cur = ggml_add(ctx0, cur, model_.text_proj_fc2_bias);
-    
-    if (has_speaker_embd) {
-        struct ggml_tensor * speaker_expanded = ggml_repeat(ctx0, 
-            ggml_reshape_2d(ctx0, inp_speaker, hidden_size, 1),
-            ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hidden_size, n_tokens));
-        cur = ggml_add(ctx0, cur, speaker_expanded);
-    }
+
+    struct ggml_tensor * cur = inp_prefill_embd;
     
     struct ggml_tensor * inpL = cur;
     
@@ -697,7 +1047,8 @@ struct ggml_cgraph * TTSTransformer::build_text_graph(int32_t n_tokens, int32_t 
         
         cur = ggml_mul(ctx0, gate, up);
         
-        cur = ggml_mul_mat(ctx0, layer.ffn_down, cur);
+        struct ggml_tensor * ffn_down_f32 = ggml_cast(ctx0, layer.ffn_down, GGML_TYPE_F32);
+        cur = ggml_mul_mat(ctx0, ffn_down_f32, cur);
         
         inpL = ggml_add(ctx0, cur, inpFF);
     }
@@ -708,15 +1059,19 @@ struct ggml_cgraph * TTSTransformer::build_text_graph(int32_t n_tokens, int32_t 
     cur = ggml_mul(ctx0, cur, model_.output_norm);
     ggml_set_name(cur, "hidden_states");
     ggml_set_output(cur);
+
+    struct ggml_tensor * logits = ggml_mul_mat(ctx0, model_.codec_head, cur);
+    ggml_set_name(logits, "logits");
+    ggml_set_output(logits);
     
-    ggml_build_forward_expand(gf, cur);
+    ggml_build_forward_expand(gf, logits);
     
     ggml_free(ctx0);
     
     return gf;
 }
 
-struct ggml_cgraph * TTSTransformer::build_codec_graph(int32_t n_past) {
+struct ggml_cgraph * TTSTransformer::build_step_graph(int32_t n_past) {
     const auto & cfg = model_.config;
     const int n_head = cfg.n_attention_heads;
     const int n_kv_head = cfg.n_key_value_heads;
@@ -735,16 +1090,16 @@ struct ggml_cgraph * TTSTransformer::build_codec_graph(int32_t n_past) {
     
     struct ggml_context * ctx0 = ggml_init(params);
     struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, QWEN3_TTS_MAX_NODES, false);
-    
-    struct ggml_tensor * inp_token = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
-    ggml_set_name(inp_token, "inp_codec_token");
-    ggml_set_input(inp_token);
+
+    struct ggml_tensor * inp_step_embd = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hidden_size, 1);
+    ggml_set_name(inp_step_embd, "inp_step_embd");
+    ggml_set_input(inp_step_embd);
     
     struct ggml_tensor * inp_pos = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1);
     ggml_set_name(inp_pos, "inp_pos");
     ggml_set_input(inp_pos);
-    
-    struct ggml_tensor * cur = ggml_get_rows(ctx0, model_.codec_embd, inp_token);
+
+    struct ggml_tensor * cur = inp_step_embd;
     
     struct ggml_tensor * inpL = cur;
     
@@ -837,7 +1192,8 @@ struct ggml_cgraph * TTSTransformer::build_codec_graph(int32_t n_past) {
         
         cur = ggml_mul(ctx0, gate, up);
         
-        cur = ggml_mul_mat(ctx0, layer.ffn_down, cur);
+        struct ggml_tensor * ffn_down_f32 = ggml_cast(ctx0, layer.ffn_down, GGML_TYPE_F32);
+        cur = ggml_mul_mat(ctx0, ffn_down_f32, cur);
         
         inpL = ggml_add(ctx0, cur, inpFF);
     }
@@ -956,7 +1312,8 @@ struct ggml_cgraph * TTSTransformer::build_code_pred_graph(int32_t n_prev_codes)
         
         cur = ggml_mul(ctx0, gate, up);
         
-        cur = ggml_mul_mat(ctx0, layer.ffn_down, cur);
+        struct ggml_tensor * old_ffn_down_f32 = ggml_cast(ctx0, layer.ffn_down, GGML_TYPE_F32);
+        cur = ggml_mul_mat(ctx0, old_ffn_down_f32, cur);
         
         inpL = ggml_add(ctx0, cur, inpFF);
     }
@@ -1099,22 +1456,20 @@ struct ggml_cgraph * TTSTransformer::build_code_pred_prefill_graph() {
         
         cur = ggml_mul(ctx0, gate, up);
         
-        cur = ggml_mul_mat(ctx0, layer.ffn_down, cur);
+        struct ggml_tensor * ffn_down_f32 = ggml_cast(ctx0, layer.ffn_down, GGML_TYPE_F32);
+        cur = ggml_mul_mat(ctx0, ffn_down_f32, cur);
         
         inpL = ggml_add(ctx0, cur, inpFF);
     }
     
      cur = inpL;
      
-     // Apply final RMS norm
      cur = ggml_rms_norm(ctx0, cur, eps);
      cur = ggml_mul(ctx0, cur, model_.code_pred_output_norm);
      
-     // Get the last token's hidden state (position 1) for lm_head[0]
      struct ggml_tensor * last_hidden = ggml_view_2d(ctx0, cur, hidden_size, 1, 
                                                       cur->nb[1], hidden_size * sizeof(float));
      
-     // Use lm_head[0] to predict codebook 1
      struct ggml_tensor * logits = ggml_mul_mat(ctx0, model_.code_pred_head[0], last_hidden);
     ggml_set_name(logits, "logits");
     ggml_set_output(logits);
@@ -1257,14 +1612,14 @@ struct ggml_cgraph * TTSTransformer::build_code_pred_step_graph(int32_t n_past, 
         
         cur = ggml_mul(ctx0, gate, up);
         
-        cur = ggml_mul_mat(ctx0, layer.ffn_down, cur);
+        struct ggml_tensor * step_ffn_down_f32 = ggml_cast(ctx0, layer.ffn_down, GGML_TYPE_F32);
+        cur = ggml_mul_mat(ctx0, step_ffn_down_f32, cur);
         
         inpL = ggml_add(ctx0, cur, inpFF);
     }
     
      cur = inpL;
      
-     // Apply final RMS norm
      cur = ggml_rms_norm(ctx0, cur, eps);
      cur = ggml_mul(ctx0, cur, model_.code_pred_output_norm);
      
@@ -1279,11 +1634,19 @@ struct ggml_cgraph * TTSTransformer::build_code_pred_step_graph(int32_t n_past, 
     return gf;
 }
 
-bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
-                                   const float * speaker_embd, int32_t n_past,
-                                   std::vector<float> & output) {
+bool TTSTransformer::forward_prefill(const float * prefill_embd, int32_t n_tokens,
+                                     int32_t n_past, std::vector<float> & output,
+                                     std::vector<float> * logits_out) {
     if (!model_.ctx) {
         error_msg_ = "Model not loaded";
+        return false;
+    }
+    if (!prefill_embd) {
+        error_msg_ = "prefill_embd is null";
+        return false;
+    }
+    if (n_tokens <= 0) {
+        error_msg_ = "n_tokens must be > 0";
         return false;
     }
     
@@ -1298,17 +1661,17 @@ bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
         return false;
     }
     
-    bool has_speaker = (speaker_embd != nullptr);
-    struct ggml_cgraph * gf = build_text_graph(n_tokens, n_past, has_speaker);
+    struct ggml_cgraph * gf = build_prefill_forward_graph(n_tokens, n_past);
     
     if (!ggml_backend_sched_alloc_graph(state_.sched, gf)) {
         error_msg_ = "Failed to allocate graph";
         return false;
     }
     
-    struct ggml_tensor * inp_tokens = ggml_graph_get_tensor(gf, "inp_tokens");
-    if (inp_tokens) {
-        ggml_backend_tensor_set(inp_tokens, text_tokens, 0, n_tokens * sizeof(int32_t));
+    struct ggml_tensor * inp_prefill = ggml_graph_get_tensor(gf, "inp_prefill_embd");
+    if (inp_prefill) {
+        ggml_backend_tensor_set(inp_prefill, prefill_embd, 0,
+                                (size_t)n_tokens * model_.config.hidden_size * sizeof(float));
     }
     
     struct ggml_tensor * inp_pos = ggml_graph_get_tensor(gf, "inp_pos");
@@ -1318,14 +1681,6 @@ bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
             positions[i] = n_past + i;
         }
         ggml_backend_tensor_set(inp_pos, positions.data(), 0, n_tokens * sizeof(int32_t));
-    }
-    
-    if (has_speaker) {
-        struct ggml_tensor * inp_speaker = ggml_graph_get_tensor(gf, "inp_speaker");
-        if (inp_speaker) {
-            ggml_backend_tensor_set(inp_speaker, speaker_embd, 0, 
-                                    model_.config.hidden_size * sizeof(float));
-        }
     }
     
     if (ggml_backend_sched_graph_compute(state_.sched, gf) != GGML_STATUS_SUCCESS) {
@@ -1348,6 +1703,20 @@ bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
     ggml_backend_tensor_get(hidden, last_hidden_.data(), 
                            (n_tokens - 1) * model_.config.hidden_size * sizeof(float),
                            model_.config.hidden_size * sizeof(float));
+
+    if (logits_out) {
+        struct ggml_tensor * logits = ggml_graph_get_tensor(gf, "logits");
+        if (!logits) {
+            error_msg_ = "Failed to find logits tensor";
+            ggml_backend_sched_reset(state_.sched);
+            return false;
+        }
+
+        logits_out->resize(model_.config.codec_vocab_size);
+        ggml_backend_tensor_get(logits, logits_out->data(),
+                                (n_tokens - 1) * model_.config.codec_vocab_size * sizeof(float),
+                                model_.config.codec_vocab_size * sizeof(float));
+    }
     
     state_.cache.n_used = n_past + n_tokens;
     
@@ -1356,34 +1725,70 @@ bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
     return true;
 }
 
-bool TTSTransformer::forward_codec(int32_t codec_token, int32_t n_past,
-                                    std::vector<float> & output) {
+bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
+                                  const float * speaker_embd, int32_t n_past,
+                                  std::vector<float> & output) {
+    if (!text_tokens) {
+        error_msg_ = "text_tokens is null";
+        return false;
+    }
+    if (n_tokens <= 0) {
+        error_msg_ = "n_tokens must be > 0";
+        return false;
+    }
+
+    std::vector<float> projected;
+    if (!project_text_tokens(text_tokens, n_tokens, projected)) {
+        return false;
+    }
+
+    if (speaker_embd) {
+        const int32_t hidden_size = model_.config.hidden_size;
+        for (int32_t t = 0; t < n_tokens; ++t) {
+            float * row = projected.data() + (size_t)t * hidden_size;
+            for (int32_t h = 0; h < hidden_size; ++h) {
+                row[h] += speaker_embd[h];
+            }
+        }
+    }
+
+    return forward_prefill(projected.data(), n_tokens, n_past, output, nullptr);
+}
+
+bool TTSTransformer::forward_step(const float * step_embd, int32_t n_past,
+                                  std::vector<float> & output,
+                                  std::vector<float> * hidden_out) {
     if (!model_.ctx) {
         error_msg_ = "Model not loaded";
         return false;
     }
-    
+    if (!step_embd) {
+        error_msg_ = "step_embd is null";
+        return false;
+    }
+
     if (state_.cache.n_ctx == 0) {
         if (!init_kv_cache(4096)) {
             return false;
         }
     }
-    
+
     if (n_past + 1 > state_.cache.n_ctx) {
         error_msg_ = "Context length exceeded";
         return false;
     }
     
-    struct ggml_cgraph * gf = build_codec_graph(n_past);
+    struct ggml_cgraph * gf = build_step_graph(n_past);
     
     if (!ggml_backend_sched_alloc_graph(state_.sched, gf)) {
         error_msg_ = "Failed to allocate graph";
         return false;
     }
     
-    struct ggml_tensor * inp_token = ggml_graph_get_tensor(gf, "inp_codec_token");
-    if (inp_token) {
-        ggml_backend_tensor_set(inp_token, &codec_token, 0, sizeof(int32_t));
+    struct ggml_tensor * inp_step = ggml_graph_get_tensor(gf, "inp_step_embd");
+    if (inp_step) {
+        ggml_backend_tensor_set(inp_step, step_embd, 0,
+                                model_.config.hidden_size * sizeof(float));
     }
     
     struct ggml_tensor * inp_pos = ggml_graph_get_tensor(gf, "inp_pos");
@@ -1403,6 +1808,9 @@ bool TTSTransformer::forward_codec(int32_t codec_token, int32_t n_past,
         last_hidden_.resize(model_.config.hidden_size);
         ggml_backend_tensor_get(hidden, last_hidden_.data(), 0, 
                                model_.config.hidden_size * sizeof(float));
+        if (hidden_out) {
+            *hidden_out = last_hidden_;
+        }
     }
     
     struct ggml_tensor * logits = ggml_graph_get_tensor(gf, "logits");
@@ -1420,6 +1828,18 @@ bool TTSTransformer::forward_codec(int32_t codec_token, int32_t n_past,
     ggml_backend_sched_reset(state_.sched);
     
     return true;
+}
+
+bool TTSTransformer::forward_codec(int32_t codec_token, int32_t n_past,
+                                   std::vector<float> & output) {
+    std::vector<float> codec_row;
+    if (!lookup_embedding_rows(model_.codec_embd, &codec_token, 1,
+                               "inp_legacy_codec_token", "legacy_codec_row",
+                               codec_row)) {
+        return false;
+    }
+
+    return forward_step(codec_row.data(), n_past, output, nullptr);
 }
 
 bool TTSTransformer::get_hidden_states(std::vector<float> & hidden) const {
@@ -1511,49 +1931,11 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
     output.resize(15);
     std::vector<float> logits_data(cfg.code_pred_vocab_size);
     
-    // Step 1: Compute codec_embd(codebook_0_token) using talker's codec_embd
-    // We need to build a small graph to do the embedding lookup since the tensor may be F16
-    std::vector<float> cb0_embd(cfg.hidden_size);
-    {
-        struct ggml_init_params embd_params = {
-            /*.mem_size   =*/ ggml_tensor_overhead() * 4 + ggml_graph_overhead(),
-            /*.mem_buffer =*/ nullptr,
-            /*.no_alloc   =*/ true,
-        };
-        struct ggml_context * embd_ctx = ggml_init(embd_params);
-        struct ggml_cgraph * embd_gf = ggml_new_graph(embd_ctx);
-        
-        struct ggml_tensor * inp_token = ggml_new_tensor_1d(embd_ctx, GGML_TYPE_I32, 1);
-        ggml_set_name(inp_token, "inp_token");
-        ggml_set_input(inp_token);
-        
-        struct ggml_tensor * embd_out = ggml_get_rows(embd_ctx, model_.codec_embd, inp_token);
-        ggml_set_name(embd_out, "embd_out");
-        ggml_set_output(embd_out);
-        
-        ggml_build_forward_expand(embd_gf, embd_out);
-        
-        if (!ggml_backend_sched_alloc_graph(state_.sched, embd_gf)) {
-            error_msg_ = "Failed to allocate embedding lookup graph";
-            ggml_free(embd_ctx);
-            return false;
-        }
-        
-        struct ggml_tensor * inp = ggml_graph_get_tensor(embd_gf, "inp_token");
-        ggml_backend_tensor_set(inp, &codebook_0_token, 0, sizeof(int32_t));
-        
-        if (ggml_backend_sched_graph_compute(state_.sched, embd_gf) != GGML_STATUS_SUCCESS) {
-            error_msg_ = "Failed to compute embedding lookup";
-            ggml_backend_sched_reset(state_.sched);
-            ggml_free(embd_ctx);
-            return false;
-        }
-        
-        struct ggml_tensor * out = ggml_graph_get_tensor(embd_gf, "embd_out");
-        ggml_backend_tensor_get(out, cb0_embd.data(), 0, cfg.hidden_size * sizeof(float));
-        
-        ggml_backend_sched_reset(state_.sched);
-        ggml_free(embd_ctx);
+    std::vector<float> cb0_embd;
+    if (!lookup_embedding_rows(model_.codec_embd, &codebook_0_token, 1,
+                                "inp_codepred_cb0", "codepred_cb0",
+                                cb0_embd)) {
+        return false;
     }
     
     // Step 2: Prefill with 2 tokens [past_hidden, cb0_embd]
@@ -1595,7 +1977,7 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
         }
         
         ggml_backend_tensor_get(logits, logits_data.data(), 0, 
-                                cfg.code_pred_vocab_size * sizeof(float));
+                                 cfg.code_pred_vocab_size * sizeof(float));
         
         output[0] = argmax(logits_data.data(), cfg.code_pred_vocab_size);
         
@@ -1646,7 +2028,7 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
         }
         
         ggml_backend_tensor_get(logits, logits_data.data(), 0, 
-                                cfg.code_pred_vocab_size * sizeof(float));
+                                 cfg.code_pred_vocab_size * sizeof(float));
         
         output[step] = argmax(logits_data.data(), cfg.code_pred_vocab_size);
         
@@ -1658,55 +2040,63 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
 
 bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
                                const float * speaker_embd, int32_t max_len,
-                               std::vector<int32_t> & output) {
+                               std::vector<int32_t> & output,
+                               int32_t language_id) {
     if (!model_.ctx) {
         error_msg_ = "Model not loaded";
         return false;
+    }
+    if (!text_tokens) {
+        error_msg_ = "text_tokens is null";
+        return false;
+    }
+    if (n_tokens < 4) {
+        error_msg_ = "Need at least 4 text tokens for generation";
+        return false;
+    }
+    if (max_len <= 0) {
+        output.clear();
+        return true;
     }
     
     const auto & cfg = model_.config;
     
     clear_kv_cache();
+
+    std::vector<float> prefill_embd;
+    std::vector<float> trailing_text_hidden;
+    std::vector<float> tts_pad_embed;
+    if (!build_prefill_graph(text_tokens, n_tokens, speaker_embd, language_id,
+                             prefill_embd, trailing_text_hidden, tts_pad_embed)) {
+        return false;
+    }
+
+    const int32_t prefill_len = (int32_t)(prefill_embd.size() / cfg.hidden_size);
+    const int32_t trailing_len = (int32_t)(trailing_text_hidden.size() / cfg.hidden_size);
     
     std::vector<float> hidden_out;
-    if (!forward_text(text_tokens, n_tokens, speaker_embd, 0, hidden_out)) {
+    std::vector<float> logits;
+    if (!forward_prefill(prefill_embd.data(), prefill_len, 0, hidden_out, &logits)) {
         return false;
     }
     
     output.clear();
     output.reserve(max_len * cfg.n_codebooks);
     
-    int32_t n_past = n_tokens;
-    int32_t current_token = cfg.codec_bos_id;
-    
-    std::vector<float> logits;
+    int32_t n_past = prefill_len;
     std::vector<int32_t> frame_codes(cfg.n_codebooks);
     
     for (int frame = 0; frame < max_len; ++frame) {
-        if (!forward_codec(current_token, n_past, logits)) {
-            return false;
-        }
-        
         int32_t next_token = argmax(logits.data(), cfg.codec_vocab_size);
         
         if (next_token == cfg.codec_eos_id) {
             break;
         }
         
-        if (next_token >= cfg.code_pred_vocab_size) {
-            next_token = next_token % cfg.code_pred_vocab_size;
-        }
-        
         frame_codes[0] = next_token;
         
-        std::vector<float> hidden;
-        if (!get_hidden_states(hidden)) {
-            error_msg_ = "Failed to get hidden states";
-            return false;
-        }
-        
         std::vector<int32_t> codes_1_15;
-        if (!predict_codes_autoregressive(hidden.data(), frame_codes[0], codes_1_15)) {
+        if (!predict_codes_autoregressive(last_hidden_.data(), frame_codes[0], codes_1_15)) {
             return false;
         }
         
@@ -1717,8 +2107,46 @@ bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
         for (int cb = 0; cb < cfg.n_codebooks; ++cb) {
             output.push_back(frame_codes[cb]);
         }
+
+        if (frame + 1 >= max_len) {
+            break;
+        }
+
+        std::vector<float> step_embd(cfg.hidden_size, 0.0f);
+        std::vector<float> embd_row;
+
+        if (!lookup_embedding_rows(model_.codec_embd, &frame_codes[0], 1,
+                                   "inp_step_cb0", "step_cb0",
+                                   embd_row)) {
+            return false;
+        }
+        for (int32_t h = 0; h < cfg.hidden_size; ++h) {
+            step_embd[h] += embd_row[h];
+        }
+
+        for (int cb = 1; cb < cfg.n_codebooks; ++cb) {
+            int32_t code_token = frame_codes[cb];
+            if (!lookup_embedding_rows(model_.code_pred_embd[cb - 1], &code_token, 1,
+                                       "inp_step_cb", "step_cb",
+                                       embd_row)) {
+                return false;
+            }
+            for (int32_t h = 0; h < cfg.hidden_size; ++h) {
+                step_embd[h] += embd_row[h];
+            }
+        }
+
+        const float * trailing_row = (frame < trailing_len)
+            ? trailing_text_hidden.data() + (size_t)frame * cfg.hidden_size
+            : tts_pad_embed.data();
+        for (int32_t h = 0; h < cfg.hidden_size; ++h) {
+            step_embd[h] += trailing_row[h];
+        }
+
+        if (!forward_step(step_embd.data(), n_past, logits)) {
+            return false;
+        }
         
-        current_token = next_token;
         n_past++;
     }
     

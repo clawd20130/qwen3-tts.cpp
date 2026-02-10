@@ -44,6 +44,17 @@ struct tts_transformer_config {
     int32_t codec_pad_id = 2148;
     int32_t codec_bos_id = 2149;
     int32_t codec_eos_id = 2150;
+
+    int32_t tts_bos_token_id = 151672;
+    int32_t tts_eos_token_id = 151673;
+    int32_t tts_pad_token_id = 151671;
+
+    int32_t codec_think_id = 2154;
+    int32_t codec_nothink_id = 2155;
+    int32_t codec_think_bos_id = 2156;
+    int32_t codec_think_eos_id = 2157;
+
+    int32_t english_language_id = 2050;
 };
 
 // Transformer layer weights
@@ -162,6 +173,10 @@ public:
     bool forward_text(const int32_t * text_tokens, int32_t n_tokens,
                       const float * speaker_embd, int32_t n_past,
                       std::vector<float> & output);
+
+    bool forward_prefill(const float * prefill_embd, int32_t n_tokens,
+                         int32_t n_past, std::vector<float> & output,
+                         std::vector<float> * logits_out = nullptr);
     
     // Forward pass for codec tokens (generation phase)
     // codec_token: single codec token for first codebook
@@ -169,6 +184,10 @@ public:
     // output: logits for next codec token [codec_vocab_size]
     bool forward_codec(int32_t codec_token, int32_t n_past,
                        std::vector<float> & output);
+
+    bool forward_step(const float * step_embd, int32_t n_past,
+                      std::vector<float> & output,
+                      std::vector<float> * hidden_out = nullptr);
     
     // Get hidden states from last forward pass (for code predictor)
     bool get_hidden_states(std::vector<float> & hidden) const;
@@ -194,7 +213,8 @@ public:
     // output: generated speech codes [n_frames, n_codebooks]
     bool generate(const int32_t * text_tokens, int32_t n_tokens,
                   const float * speaker_embd, int32_t max_len,
-                  std::vector<int32_t> & output);
+                  std::vector<int32_t> & output,
+                  int32_t language_id = 2050);
     
     const tts_transformer_config & get_config() const { return model_.config; }
     
@@ -210,12 +230,22 @@ public:
                             std::vector<float> & output);
     
 private:
-    // Build computation graph for text forward pass
-    struct ggml_cgraph * build_text_graph(int32_t n_tokens, int32_t n_past,
-                                          bool has_speaker_embd);
-    
-    // Build computation graph for codec forward pass
-    struct ggml_cgraph * build_codec_graph(int32_t n_past);
+    bool build_prefill_graph(const int32_t * text_tokens, int32_t n_tokens,
+                             const float * speaker_embd, int32_t language_id,
+                             std::vector<float> & prefill_embd,
+                             std::vector<float> & trailing_text_hidden,
+                             std::vector<float> & tts_pad_embed);
+
+    struct ggml_cgraph * build_prefill_forward_graph(int32_t n_tokens, int32_t n_past);
+
+    struct ggml_cgraph * build_step_graph(int32_t n_past);
+
+    bool project_text_tokens(const int32_t * text_tokens, int32_t n_tokens,
+                             std::vector<float> & output);
+
+    bool lookup_embedding_rows(struct ggml_tensor * embedding, const int32_t * token_ids,
+                               int32_t n_tokens, const char * input_name,
+                               const char * output_name, std::vector<float> & output);
     
     // Build computation graph for code predictor
     struct ggml_cgraph * build_code_pred_graph(int32_t n_prev_codes);

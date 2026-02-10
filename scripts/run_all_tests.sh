@@ -70,7 +70,7 @@ log ""
 
 log "--- Test 1.3: Transformer ---"
 if [[ -x "./build/test_transformer" ]]; then
-    if timeout 180 ./build/test_transformer --model models/qwen3-tts-0.6b-f16.gguf --tokens reference/text_tokens.bin 2>&1 | grep -q "All tests passed"; then
+    if timeout 180 ./build/test_transformer --model models/qwen3-tts-0.6b-f16.gguf --ref-dir reference/ 2>&1 | grep -q "All tests passed"; then
         pass "Transformer test (generates speech codes)"
     else
         fail "Transformer test"
@@ -187,6 +187,23 @@ for wav in "$TEST_OUTPUT_DIR"/*.wav; do
     fi
 done
 shopt -u nullglob
+log ""
+
+log "============================================"
+log "SECTION 6: E2E Python vs C++ Comparison"
+log "============================================"
+log ""
+
+log "--- Test 6.1: E2E Comparison ---"
+if command -v uv &>/dev/null && [[ -f "scripts/compare_e2e.py" ]]; then
+    if timeout 600 uv run python scripts/compare_e2e.py 2>&1 | grep -q "PASS"; then
+        pass "E2E comparison test"
+    else
+        fail "E2E comparison test"
+    fi
+else
+    skip "E2E comparison (uv or script not found)"
+fi
 log ""
 
 log "============================================"
