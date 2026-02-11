@@ -29,7 +29,7 @@ AudioTokenizerDecoder::~AudioTokenizerDecoder() {
 void AudioTokenizerDecoder::normalize_codebooks() {
     const float epsilon = 1e-5f;
     
-    auto normalize_codebook = [epsilon](struct ggml_tensor * codebook, struct ggml_tensor * usage, const char * name) {
+    auto normalize_codebook = [epsilon](struct ggml_tensor * codebook, struct ggml_tensor * usage, const char *) {
         if (!codebook || !usage || !codebook->data || !usage->data) return;
         
         int64_t codebook_dim = codebook->ne[0];
@@ -50,22 +50,6 @@ void AudioTokenizerDecoder::normalize_codebooks() {
             }
         }
         
-        if (strcmp(name, "first") == 0) {
-            fprintf(stderr, "DEBUG: %s codebook entry 1221 first 5: ", name);
-            for (int i = 0; i < 5; ++i) {
-                int64_t idx = i + 1221 * codebook_dim;
-                fprintf(stderr, "%.4f ", ggml_fp16_to_fp32(cb_data[idx]));
-            }
-            fprintf(stderr, "\n");
-        }
-        if (strcmp(name, "rest0") == 0) {
-            fprintf(stderr, "DEBUG: %s codebook entry 472 first 5: ", name);
-            for (int i = 0; i < 5; ++i) {
-                int64_t idx = i + 472 * codebook_dim;
-                fprintf(stderr, "%.4f ", ggml_fp16_to_fp32(cb_data[idx]));
-            }
-            fprintf(stderr, "\n");
-        }
     };
     
     normalize_codebook(model_.vq_first_codebook, model_.vq_first_usage, "first");
@@ -471,112 +455,56 @@ struct ggml_tensor * AudioTokenizerDecoder::apply_upsample_block(struct ggml_con
     int64_t seq_len = x->ne[0];
     int64_t channels = x->ne[1];
     
-    struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, channels);
-    x_2d = ggml_conv_transpose_1d(ctx, block.conv_w, x_2d, 2, 0, 1);
+     struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, channels);
+     x_2d = ggml_conv_transpose_1d(ctx, block.conv_w, x_2d, 2, 0, 1);
+     
+     int64_t new_seq_len = x_2d->ne[0];
+     x = ggml_reshape_3d(ctx, x_2d, new_seq_len, channels, 1);
+     
+     if (block.conv_b) {
+         x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.conv_b, 1, channels, 1));
+     }
     
-    int64_t new_seq_len = x_2d->ne[0];
-    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, channels, 1);
-    
-    if (block.conv_b) {
-        x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.conv_b, 1, channels, 1));
-    }
-    
-    // Debug: after conv_transpose
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_conv_t", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
-    
-    struct ggml_tensor * residual = x;
-    
-    if (block.dwconv_w) {
-        // Causal padding: pad left with 6 zeros (kernel_size - 1 = 7 - 1 = 6)
-        x = ggml_pad_ext(ctx, x, 6, 0, 0, 0, 0, 0, 0, 0);  // left pad only
-        x = ggml_conv_1d_dw(ctx, block.dwconv_w, x, 1, 0, 1);  // no padding in conv
-        if (block.dwconv_b) {
-            x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.dwconv_b, 1, channels, 1));
-        }
-    }
-    
-    // Debug: after dwconv
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_dwconv", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
+     struct ggml_tensor * residual = x;
+     
+     if (block.dwconv_w) {
+         // Causal padding: pad left with 6 zeros (kernel_size - 1 = 7 - 1 = 6)
+         x = ggml_pad_ext(ctx, x, 6, 0, 0, 0, 0, 0, 0, 0);  // left pad only
+         x = ggml_conv_1d_dw(ctx, block.dwconv_w, x, 1, 0, 1);  // no padding in conv
+         if (block.dwconv_b) {
+             x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.dwconv_b, 1, channels, 1));
+         }
+     }
     
     x = ggml_permute(ctx, x, 1, 0, 2, 3);
     x = ggml_cont(ctx, x);
     
-    if (block.norm_w && block.norm_b) {
-        x = ggml_norm(ctx, x, 1e-6f);
-        x = ggml_mul(ctx, x, block.norm_w);
-        x = ggml_add(ctx, x, block.norm_b);
-    }
+     if (block.norm_w && block.norm_b) {
+         x = ggml_norm(ctx, x, 1e-6f);
+         x = ggml_mul(ctx, x, block.norm_w);
+         x = ggml_add(ctx, x, block.norm_b);
+     }
     
-    // Debug: after norm
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_norm", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
+     x = ggml_mul_mat(ctx, block.pwconv1_w, x);
+     if (block.pwconv1_b) {
+         x = ggml_add(ctx, x, block.pwconv1_b);
+     }
     
-    x = ggml_mul_mat(ctx, block.pwconv1_w, x);
-    if (block.pwconv1_b) {
-        x = ggml_add(ctx, x, block.pwconv1_b);
-    }
+     x = ggml_gelu(ctx, x);
     
-    // Debug: after pwconv1
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_pwconv1", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
-    
-    x = ggml_gelu(ctx, x);
-    
-    // Debug: after gelu
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_gelu", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
-    
-    x = ggml_mul_mat(ctx, block.pwconv2_w, x);
-    if (block.pwconv2_b) {
-        x = ggml_add(ctx, x, block.pwconv2_b);
-    }
-    
-    // Debug: after pwconv2
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_pwconv2", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
+     x = ggml_mul_mat(ctx, block.pwconv2_w, x);
+     if (block.pwconv2_b) {
+         x = ggml_add(ctx, x, block.pwconv2_b);
+     }
     
     x = ggml_permute(ctx, x, 1, 0, 2, 3);
     x = ggml_cont(ctx, x);
     
-    if (block.gamma) {
-        struct ggml_tensor * gamma_3d = ggml_reshape_3d(ctx, block.gamma, 1, channels, 1);
-        x = ggml_mul(ctx, x, ggml_repeat(ctx, gamma_3d, 
-                                          ggml_new_tensor_3d(ctx, GGML_TYPE_F32, new_seq_len, channels, 1)));
-    }
-    
-    // Debug: after gamma
-    if (block_idx == 0) {
-        char name[64];
-        snprintf(name, sizeof(name), "up%d_gamma", block_idx);
-        ggml_set_name(x, name);
-        ggml_set_output(x);
-    }
+     if (block.gamma) {
+         struct ggml_tensor * gamma_3d = ggml_reshape_3d(ctx, block.gamma, 1, channels, 1);
+         x = ggml_mul(ctx, x, ggml_repeat(ctx, gamma_3d, 
+                                           ggml_new_tensor_3d(ctx, GGML_TYPE_F32, new_seq_len, channels, 1)));
+     }
     
     return ggml_add(ctx, residual, x);
 }
@@ -616,66 +544,34 @@ struct ggml_tensor * AudioTokenizerDecoder::apply_decoder_block(struct ggml_cont
                                                                   const decoder_block & block,
                                                                   int upsample_rate,
                                                                   int block_idx) {
-    if (block_idx == 0) {
-        fprintf(stderr, "DEBUG: apply_decoder_block[0] snake_alpha=%p, snake_beta=%p\n",
-                (void*)block.snake_alpha, (void*)block.snake_beta);
-    }
-    
     if (block.snake_alpha && block.snake_beta) {
         x = apply_snake(ctx, x, block.snake_alpha, block.snake_beta);
-        if (block_idx == 0) {
-            fprintf(stderr, "DEBUG: apply_decoder_block[0] snake applied\n");
-        }
-    } else {
-        if (block_idx == 0) {
-            fprintf(stderr, "DEBUG: apply_decoder_block[0] snake NOT applied\n");
-        }
     }
     
-    if (block_idx == 0) {
-        ggml_set_name(x, "dec1_after_snake");
-        ggml_set_output(x);
-    }
-    
-    int64_t seq_len = x->ne[0];
-    int64_t in_channels = x->ne[1];
-    int64_t out_channels = block.conv_t_w->ne[1];
-    int kernel_size = block.conv_t_w->ne[0];
-    
-    struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, in_channels);
-    x_2d = ggml_conv_transpose_1d(ctx, block.conv_t_w, x_2d, upsample_rate, 0, 1);
-    
-    int64_t new_seq_len = x_2d->ne[0];
-    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, out_channels, 1);
-    
-    if (block_idx == 0) {
-        ggml_set_name(x, "dec1_after_conv_t_raw");
-        ggml_set_output(x);
-    }
-    
-    // Python CausalTransConvNet: left_pad = right_pad = kernel_size - stride
-    int pad = kernel_size - upsample_rate;
-    int left_pad = pad;
-    int right_pad = pad;
-    int64_t out_seq_len = new_seq_len - left_pad - right_pad;
-    
-    x = ggml_view_3d(ctx, x, out_seq_len, out_channels, 1,
-                     x->nb[1], x->nb[2], left_pad * x->nb[0]);
-    x = ggml_cont(ctx, x);
-    
-    if (block_idx == 0) {
-        ggml_set_name(x, "dec1_after_trim");
-        ggml_set_output(x);
-    }
-    
-    if (block.conv_t_b) {
-        x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.conv_t_b, 1, out_channels, 1));
-    }
-    
-    if (block_idx == 0) {
-        ggml_set_name(x, "dec1_after_bias");
-        ggml_set_output(x);
-    }
+     int64_t seq_len = x->ne[0];
+     int64_t in_channels = x->ne[1];
+     int64_t out_channels = block.conv_t_w->ne[1];
+     int kernel_size = block.conv_t_w->ne[0];
+     
+     struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, in_channels);
+     x_2d = ggml_conv_transpose_1d(ctx, block.conv_t_w, x_2d, upsample_rate, 0, 1);
+     
+     int64_t new_seq_len = x_2d->ne[0];
+     x = ggml_reshape_3d(ctx, x_2d, new_seq_len, out_channels, 1);
+     
+     // Python CausalTransConvNet: left_pad = right_pad = kernel_size - stride
+     int pad = kernel_size - upsample_rate;
+     int left_pad = pad;
+     int right_pad = pad;
+     int64_t out_seq_len = new_seq_len - left_pad - right_pad;
+     
+     x = ggml_view_3d(ctx, x, out_seq_len, out_channels, 1,
+                      x->nb[1], x->nb[2], left_pad * x->nb[0]);
+     x = ggml_cont(ctx, x);
+     
+     if (block.conv_t_b) {
+         x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.conv_t_b, 1, out_channels, 1));
+     }
     
     for (int i = 0; i < 3; ++i) {
         x = apply_residual_block(ctx, x, block.res[i]);
@@ -712,172 +608,145 @@ struct ggml_cgraph * AudioTokenizerDecoder::build_graph(int32_t n_frames) {
     
     struct ggml_tensor * first_codes = cb_codes_tensors[0];
     
-    struct ggml_tensor * first_emb = ggml_get_rows(ctx0, model_.vq_first_codebook, first_codes);
-    ggml_set_name(first_emb, "first_emb_raw");
-    ggml_set_output(first_emb);
+     struct ggml_tensor * first_emb = ggml_get_rows(ctx0, model_.vq_first_codebook, first_codes);
+     ggml_set_name(first_emb, "first_emb_raw");
+     
+     struct ggml_tensor * rest_emb[15];
+     for (int cb = 0; cb < 15; ++cb) {
+         struct ggml_tensor * cb_codes = cb_codes_tensors[cb + 1];
+         rest_emb[cb] = ggml_get_rows(ctx0, model_.vq_rest_codebook[cb], cb_codes);
+         
+         if (cb == 0) {
+             ggml_set_name(rest_emb[cb], "rest_cb0_emb_raw");
+         }
+     }
     
-    struct ggml_tensor * rest_emb[15];
-    for (int cb = 0; cb < 15; ++cb) {
-        struct ggml_tensor * cb_codes = cb_codes_tensors[cb + 1];
-        rest_emb[cb] = ggml_get_rows(ctx0, model_.vq_rest_codebook[cb], cb_codes);
-        
-        if (cb == 0) {
-            ggml_set_name(rest_emb[cb], "rest_cb0_emb_raw");
-            ggml_set_output(rest_emb[cb]);
-        }
-    }
-    
-    ggml_set_name(first_emb, "first_emb_raw");
-    ggml_set_output(first_emb);
-    
-    struct ggml_tensor * first_emb_2d = ggml_reshape_2d(ctx0, first_emb, cfg.codebook_dim, n_frames);
-    ggml_set_name(first_emb_2d, "first_emb_2d");
-    ggml_set_output(first_emb_2d);
-    
-    struct ggml_tensor * first_proj_weight_2d = ggml_reshape_2d(ctx0, model_.vq_first_output_proj, 
-                                                                  cfg.codebook_dim, cfg.hidden_dim);
-    struct ggml_tensor * first_proj_2d = ggml_mul_mat(ctx0, first_proj_weight_2d, first_emb_2d);
-    ggml_set_name(first_proj_2d, "first_proj_2d");
-    ggml_set_output(first_proj_2d);
+     struct ggml_tensor * first_emb_2d = ggml_reshape_2d(ctx0, first_emb, cfg.codebook_dim, n_frames);
+     ggml_set_name(first_emb_2d, "first_emb_2d");
+     
+     struct ggml_tensor * first_proj_weight_2d = ggml_reshape_2d(ctx0, model_.vq_first_output_proj, 
+                                                                   cfg.codebook_dim, cfg.hidden_dim);
+     struct ggml_tensor * first_proj_2d = ggml_mul_mat(ctx0, first_proj_weight_2d, first_emb_2d);
+     ggml_set_name(first_proj_2d, "first_proj_2d");
     
     struct ggml_tensor * rest_proj_weight_2d = ggml_reshape_2d(ctx0, model_.vq_rest_output_proj,
                                                                  cfg.codebook_dim, cfg.hidden_dim);
     
-    struct ggml_tensor * rest_proj_2d = nullptr;
-    for (int cb = 0; cb < 15; ++cb) {
-        struct ggml_tensor * cb_emb_2d = ggml_reshape_2d(ctx0, rest_emb[cb], cfg.codebook_dim, n_frames);
-        
-        if (cb == 0) {
-            ggml_set_name(cb_emb_2d, "rest_cb0_emb_2d");
-            ggml_set_output(cb_emb_2d);
-        }
-        
-        struct ggml_tensor * cb_proj_2d = ggml_mul_mat(ctx0, rest_proj_weight_2d, cb_emb_2d);
-        
-        if (rest_proj_2d == nullptr) {
-            rest_proj_2d = cb_proj_2d;
-        } else {
-            rest_proj_2d = ggml_add(ctx0, rest_proj_2d, cb_proj_2d);
-        }
-    }
-    ggml_set_name(rest_proj_2d, "rest_proj_2d");
-    ggml_set_output(rest_proj_2d);
+     struct ggml_tensor * rest_proj_2d = nullptr;
+     for (int cb = 0; cb < 15; ++cb) {
+         struct ggml_tensor * cb_emb_2d = ggml_reshape_2d(ctx0, rest_emb[cb], cfg.codebook_dim, n_frames);
+         
+         if (cb == 0) {
+             ggml_set_name(cb_emb_2d, "rest_cb0_emb_2d");
+         }
+         
+         struct ggml_tensor * cb_proj_2d = ggml_mul_mat(ctx0, rest_proj_weight_2d, cb_emb_2d);
+         
+         if (rest_proj_2d == nullptr) {
+             rest_proj_2d = cb_proj_2d;
+         } else {
+             rest_proj_2d = ggml_add(ctx0, rest_proj_2d, cb_proj_2d);
+         }
+     }
+     ggml_set_name(rest_proj_2d, "rest_proj_2d");
     
-    struct ggml_tensor * latent_2d = ggml_add(ctx0, first_proj_2d, rest_proj_2d);
-    ggml_set_name(latent_2d, "latent_2d");
-    ggml_set_output(latent_2d);
-    
-    struct ggml_tensor * latent_t = ggml_transpose(ctx0, latent_2d);
-    ggml_set_name(latent_t, "latent_t");
-    ggml_set_output(latent_t);
-    
-    struct ggml_tensor * latent_cont = ggml_cont(ctx0, latent_t);
-    ggml_set_name(latent_cont, "latent_cont");
-    ggml_set_output(latent_cont);
-    
-    struct ggml_tensor * latent = ggml_reshape_3d(ctx0, latent_cont, n_frames, cfg.hidden_dim, 1);
-    
-    ggml_set_name(latent, "vq_output");
-    ggml_set_output(latent);
+     struct ggml_tensor * latent_2d = ggml_add(ctx0, first_proj_2d, rest_proj_2d);
+     ggml_set_name(latent_2d, "latent_2d");
+     
+     struct ggml_tensor * latent_t = ggml_transpose(ctx0, latent_2d);
+     ggml_set_name(latent_t, "latent_t");
+     
+     struct ggml_tensor * latent_cont = ggml_cont(ctx0, latent_t);
+     ggml_set_name(latent_cont, "latent_cont");
+     
+     struct ggml_tensor * latent = ggml_reshape_3d(ctx0, latent_cont, n_frames, cfg.hidden_dim, 1);
+
+     ggml_set_name(latent, "vq_output");
     
     struct ggml_tensor * latent_for_conv = ggml_cont(ctx0, latent);
     struct ggml_tensor * latent_padded = ggml_pad_ext(ctx0, latent_for_conv, 2, 0, 0, 0, 0, 0, 0, 0);
-    struct ggml_tensor * cur = ggml_conv_1d(ctx0, model_.pre_conv_w, latent_padded, 1, 0, 1);
-    if (model_.pre_conv_b) {
-        cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.pre_conv_b, 1, cfg.latent_dim, 1));
-    }
-    
-    ggml_set_name(cur, "pre_conv_output");
-    ggml_set_output(cur);
-    
-    struct ggml_tensor * cur_2d = ggml_reshape_2d(ctx0, cur, n_frames, cfg.latent_dim);
-    struct ggml_tensor * cur_t = ggml_transpose(ctx0, cur_2d);
-    cur = ggml_cont(ctx0, cur_t);
-    
-    ggml_set_name(cur, "pre_conv_reshaped");
-    ggml_set_output(cur);
-    
-    cur = ggml_mul_mat(ctx0, model_.pre_tfm_input_proj_w, cur);
-    if (model_.pre_tfm_input_proj_b) {
-        cur = ggml_add(ctx0, cur, model_.pre_tfm_input_proj_b);
-    }
-    
-    ggml_set_name(cur, "pre_tfm_input");
-    ggml_set_output(cur);
+     struct ggml_tensor * cur = ggml_conv_1d(ctx0, model_.pre_conv_w, latent_padded, 1, 0, 1);
+     if (model_.pre_conv_b) {
+         cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.pre_conv_b, 1, cfg.latent_dim, 1));
+     }
+     
+     ggml_set_name(cur, "pre_conv_output");
+     
+     struct ggml_tensor * cur_2d = ggml_reshape_2d(ctx0, cur, n_frames, cfg.latent_dim);
+     struct ggml_tensor * cur_t = ggml_transpose(ctx0, cur_2d);
+     cur = ggml_cont(ctx0, cur_t);
+     
+     ggml_set_name(cur, "pre_conv_reshaped");
+     
+     cur = ggml_mul_mat(ctx0, model_.pre_tfm_input_proj_w, cur);
+     if (model_.pre_tfm_input_proj_b) {
+         cur = ggml_add(ctx0, cur, model_.pre_tfm_input_proj_b);
+     }
+     
+     ggml_set_name(cur, "pre_tfm_input");
     
     struct ggml_tensor * positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_frames);
     ggml_set_name(positions, "positions");
     ggml_set_input(positions);
     
-    for (int i = 0; i < cfg.n_pre_tfm_layers; ++i) {
-        cur = apply_pre_tfm_layer(ctx0, cur, model_.pre_tfm_layers[i], n_frames, positions);
-        if (i == 0) {
-            ggml_set_name(cur, "layer0_output");
-            ggml_set_output(cur);
-        }
-    }
-    
-    if (model_.pre_tfm_norm_w) {
-        cur = apply_rms_norm(ctx0, cur, model_.pre_tfm_norm_w, cfg.rms_norm_eps);
-    }
-    
-    cur = ggml_mul_mat(ctx0, model_.pre_tfm_output_proj_w, cur);
-    if (model_.pre_tfm_output_proj_b) {
-        cur = ggml_add(ctx0, cur, model_.pre_tfm_output_proj_b);
-    }
-    
-    ggml_set_name(cur, "pre_tfm_output");
-    ggml_set_output(cur);
+     for (int i = 0; i < cfg.n_pre_tfm_layers; ++i) {
+         cur = apply_pre_tfm_layer(ctx0, cur, model_.pre_tfm_layers[i], n_frames, positions);
+     }
+     
+     if (model_.pre_tfm_norm_w) {
+         cur = apply_rms_norm(ctx0, cur, model_.pre_tfm_norm_w, cfg.rms_norm_eps);
+     }
+     
+     cur = ggml_mul_mat(ctx0, model_.pre_tfm_output_proj_w, cur);
+     if (model_.pre_tfm_output_proj_b) {
+         cur = ggml_add(ctx0, cur, model_.pre_tfm_output_proj_b);
+     }
+     
+     ggml_set_name(cur, "pre_tfm_output");
     
     cur = ggml_permute(ctx0, cur, 1, 0, 2, 3);
-    cur = ggml_cont(ctx0, cur);
-    cur = ggml_reshape_3d(ctx0, cur, n_frames, cfg.latent_dim, 1);
+     cur = ggml_cont(ctx0, cur);
+     cur = ggml_reshape_3d(ctx0, cur, n_frames, cfg.latent_dim, 1);
+     
+     ggml_set_name(cur, "pre_tfm_reshaped");
     
-    ggml_set_name(cur, "pre_tfm_reshaped");
-    ggml_set_output(cur);
-    
-    for (int i = 0; i < 2; ++i) {
-        cur = apply_upsample_block(ctx0, cur, model_.upsample[i], i);
-    }
-    
-    ggml_set_name(cur, "upsample_output");
-    ggml_set_output(cur);
-    
-    // Causal padding: left pad with 6 (kernel_size - 1 = 7 - 1 = 6)
-    cur = ggml_pad_ext(ctx0, cur, 6, 0, 0, 0, 0, 0, 0, 0);
-    cur = ggml_conv_1d(ctx0, model_.dec0_conv_w, cur, 1, 0, 1);
-    if (model_.dec0_conv_b) {
-        cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.dec0_conv_b, 1, cfg.decoder_dim, 1));
-    }
-    
-    ggml_set_name(cur, "dec0_output");
-    ggml_set_output(cur);
-    
-    int upsample_rates[4] = {8, 5, 4, 3};
-    for (int i = 0; i < 4; ++i) {
-        cur = apply_decoder_block(ctx0, cur, model_.dec_blocks[i], upsample_rates[i], i);
-        char name[32];
-        snprintf(name, sizeof(name), "dec%d_output", i + 1);
-        ggml_set_name(cur, name);
-        ggml_set_output(cur);
-    }
-    
-    if (model_.dec5_snake_alpha) {
-        cur = apply_snake(ctx0, cur, model_.dec5_snake_alpha, model_.dec5_snake_beta);
-    }
-    
-    ggml_set_name(cur, "dec5_output");
-    ggml_set_output(cur);
-    
-    // Causal padding: left pad with 6 (kernel_size - 1 = 7 - 1 = 6)
-    cur = ggml_pad_ext(ctx0, cur, 6, 0, 0, 0, 0, 0, 0, 0);
-    cur = ggml_conv_1d(ctx0, model_.dec6_conv_w, cur, 1, 0, 1);
-    if (model_.dec6_conv_b) {
-        cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.dec6_conv_b, 1, 1, 1));
-    }
-    
-    ggml_set_name(cur, "dec6_output");
-    ggml_set_output(cur);
+     for (int i = 0; i < 2; ++i) {
+         cur = apply_upsample_block(ctx0, cur, model_.upsample[i], i);
+     }
+     
+     ggml_set_name(cur, "upsample_output");
+     
+     // Causal padding: left pad with 6 (kernel_size - 1 = 7 - 1 = 6)
+     cur = ggml_pad_ext(ctx0, cur, 6, 0, 0, 0, 0, 0, 0, 0);
+     cur = ggml_conv_1d(ctx0, model_.dec0_conv_w, cur, 1, 0, 1);
+     if (model_.dec0_conv_b) {
+         cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.dec0_conv_b, 1, cfg.decoder_dim, 1));
+     }
+     
+     ggml_set_name(cur, "dec0_output");
+     
+     int upsample_rates[4] = {8, 5, 4, 3};
+     for (int i = 0; i < 4; ++i) {
+         cur = apply_decoder_block(ctx0, cur, model_.dec_blocks[i], upsample_rates[i], i);
+         char name[32];
+         snprintf(name, sizeof(name), "dec%d_output", i + 1);
+         ggml_set_name(cur, name);
+     }
+     
+     if (model_.dec5_snake_alpha) {
+         cur = apply_snake(ctx0, cur, model_.dec5_snake_alpha, model_.dec5_snake_beta);
+     }
+     
+     ggml_set_name(cur, "dec5_output");
+     
+     // Causal padding: left pad with 6 (kernel_size - 1 = 7 - 1 = 6)
+     cur = ggml_pad_ext(ctx0, cur, 6, 0, 0, 0, 0, 0, 0, 0);
+     cur = ggml_conv_1d(ctx0, model_.dec6_conv_w, cur, 1, 0, 1);
+     if (model_.dec6_conv_b) {
+         cur = ggml_add(ctx0, cur, ggml_reshape_3d(ctx0, model_.dec6_conv_b, 1, 1, 1));
+     }
+     
+     ggml_set_name(cur, "dec6_output");
     
     cur = ggml_tanh(ctx0, cur);
     
@@ -925,44 +794,10 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
     save_weight(model_.vq_first_input_proj);
     save_weight(model_.vq_first_output_proj);
     
-    if (model_.vq_first_output_proj && model_.vq_first_output_proj->data) {
-        ggml_fp16_t * w_data = (ggml_fp16_t *)model_.vq_first_output_proj->data;
-        fprintf(stderr, "DEBUG: vq_first_output_proj shape [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)model_.vq_first_output_proj->ne[0],
-                (long long)model_.vq_first_output_proj->ne[1],
-                (long long)model_.vq_first_output_proj->ne[2],
-                ggml_fp16_to_fp32(w_data[0]), ggml_fp16_to_fp32(w_data[1]),
-                ggml_fp16_to_fp32(w_data[2]), ggml_fp16_to_fp32(w_data[3]),
-                ggml_fp16_to_fp32(w_data[4]));
-    }
-    
     save_weight(model_.vq_first_codebook);
     save_weight(model_.vq_first_usage);
     save_weight(model_.vq_rest_input_proj);
     save_weight(model_.vq_rest_output_proj);
-    
-    if (model_.vq_rest_output_proj && model_.vq_rest_output_proj->data) {
-        ggml_fp16_t * w_data = (ggml_fp16_t *)model_.vq_rest_output_proj->data;
-        fprintf(stderr, "DEBUG: vq_rest_output_proj shape [%lld, %lld, %lld], strides [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)model_.vq_rest_output_proj->ne[0],
-                (long long)model_.vq_rest_output_proj->ne[1],
-                (long long)model_.vq_rest_output_proj->ne[2],
-                (long long)model_.vq_rest_output_proj->nb[0],
-                (long long)model_.vq_rest_output_proj->nb[1],
-                (long long)model_.vq_rest_output_proj->nb[2],
-                ggml_fp16_to_fp32(w_data[0]), ggml_fp16_to_fp32(w_data[1]),
-                ggml_fp16_to_fp32(w_data[2]), ggml_fp16_to_fp32(w_data[3]),
-                ggml_fp16_to_fp32(w_data[4]));
-    }
-    if (model_.vq_first_output_proj && model_.vq_first_output_proj->data) {
-        fprintf(stderr, "DEBUG: vq_first_output_proj shape [%lld, %lld, %lld], strides [%lld, %lld, %lld]\n",
-                (long long)model_.vq_first_output_proj->ne[0],
-                (long long)model_.vq_first_output_proj->ne[1],
-                (long long)model_.vq_first_output_proj->ne[2],
-                (long long)model_.vq_first_output_proj->nb[0],
-                (long long)model_.vq_first_output_proj->nb[1],
-                (long long)model_.vq_first_output_proj->nb[2]);
-    }
     for (int i = 0; i < 15; ++i) {
         save_weight(model_.vq_rest_codebook[i]);
         save_weight(model_.vq_rest_usage[i]);
@@ -1008,16 +843,6 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
     save_weight(model_.dec0_conv_b);
     
     for (int i = 0; i < 4; ++i) {
-        if (i == 0 && model_.dec_blocks[i].snake_alpha) {
-            fprintf(stderr, "DEBUG: dec_blocks[0].snake_alpha = %p, data = %p\n", 
-                    (void*)model_.dec_blocks[i].snake_alpha,
-                    model_.dec_blocks[i].snake_alpha->data);
-        }
-        if (i == 0 && model_.dec_blocks[i].snake_beta) {
-            fprintf(stderr, "DEBUG: dec_blocks[0].snake_beta = %p, data = %p\n",
-                    (void*)model_.dec_blocks[i].snake_beta,
-                    model_.dec_blocks[i].snake_beta->data);
-        }
         save_weight(model_.dec_blocks[i].snake_alpha);
         save_weight(model_.dec_blocks[i].snake_beta);
         save_weight(model_.dec_blocks[i].conv_t_w);
@@ -1050,13 +875,6 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         ggml_backend_tensor_set(w.tensor, w.data, 0, w.nbytes);
     }
     
-    fprintf(stderr, "DEBUG: codes_buf_ first 5: %d %d %d %d %d\n",
-            codes_buf_[0], codes_buf_[1], codes_buf_[2], codes_buf_[3], codes_buf_[4]);
-    if (n_frames > 4) {
-        fprintf(stderr, "DEBUG: codes_buf_[0,16,32,48,64]: %d %d %d %d %d\n",
-                codes_buf_[0], codes_buf_[16], codes_buf_[32], codes_buf_[48], codes_buf_[64]);
-    }
-    
     for (int cb = 0; cb < 16; ++cb) {
         char name[32];
         snprintf(name, sizeof(name), "codes_cb%d", cb);
@@ -1070,15 +888,6 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         std::vector<int32_t> cb_codes(n_frames);
         for (int f = 0; f < n_frames; ++f) {
             cb_codes[f] = codes_buf_[f * cfg.n_codebooks + cb];
-        }
-        
-        if (cb == 0) {
-            fprintf(stderr, "DEBUG: cb0_codes first 5: %d %d %d %d %d\n",
-                    cb_codes[0], cb_codes[1], cb_codes[2], cb_codes[3], cb_codes[4]);
-        }
-        if (cb == 1) {
-            fprintf(stderr, "DEBUG: cb1_codes first 5: %d %d %d %d %d\n",
-                    cb_codes[0], cb_codes[1], cb_codes[2], cb_codes[3], cb_codes[4]);
         }
         
         ggml_backend_tensor_set(cb_tensor, cb_codes.data(), 0, n_frames * sizeof(int32_t));
@@ -1102,309 +911,6 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         error_msg_ = "Failed to compute graph";
         ggml_backend_sched_reset(state_.sched);
         return false;
-    }
-    
-    struct ggml_tensor * codes_cb0_readback = ggml_graph_get_tensor(gf, "codes_cb0");
-    if (codes_cb0_readback) {
-        std::vector<int32_t> data(ggml_nelements(codes_cb0_readback));
-        ggml_backend_tensor_get(codes_cb0_readback, data.data(), 0, data.size() * sizeof(int32_t));
-        fprintf(stderr, "DEBUG: codes_cb0 shape [%lld], first 5: %d %d %d %d %d\n",
-                (long long)codes_cb0_readback->ne[0],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * codes_cb1_readback = ggml_graph_get_tensor(gf, "codes_cb1");
-    if (codes_cb1_readback) {
-        std::vector<int32_t> data(ggml_nelements(codes_cb1_readback));
-        ggml_backend_tensor_get(codes_cb1_readback, data.data(), 0, data.size() * sizeof(int32_t));
-        fprintf(stderr, "DEBUG: codes_cb1 shape [%lld], first 5: %d %d %d %d %d\n",
-                (long long)codes_cb1_readback->ne[0],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * first_emb_raw = ggml_graph_get_tensor(gf, "first_emb_raw");
-    if (first_emb_raw) {
-        std::vector<float> data(ggml_nelements(first_emb_raw));
-        ggml_backend_tensor_get(first_emb_raw, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: first_emb_raw shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)first_emb_raw->ne[0], (long long)first_emb_raw->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * first_emb_2d = ggml_graph_get_tensor(gf, "first_emb_2d");
-    if (first_emb_2d) {
-        std::vector<float> data(ggml_nelements(first_emb_2d));
-        ggml_backend_tensor_get(first_emb_2d, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: first_emb_2d shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)first_emb_2d->ne[0], (long long)first_emb_2d->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * first_proj_2d = ggml_graph_get_tensor(gf, "first_proj_2d");
-    if (first_proj_2d) {
-        std::vector<float> data(ggml_nelements(first_proj_2d));
-        ggml_backend_tensor_get(first_proj_2d, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: first_proj_2d shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)first_proj_2d->ne[0], (long long)first_proj_2d->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_proj_2d = ggml_graph_get_tensor(gf, "rest_proj_2d");
-    if (rest_proj_2d) {
-        std::vector<float> data(ggml_nelements(rest_proj_2d));
-        ggml_backend_tensor_get(rest_proj_2d, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_proj_2d shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_proj_2d->ne[0], (long long)rest_proj_2d->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * latent_2d = ggml_graph_get_tensor(gf, "latent_2d");
-    if (latent_2d) {
-        std::vector<float> data(ggml_nelements(latent_2d));
-        ggml_backend_tensor_get(latent_2d, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: latent_2d shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)latent_2d->ne[0], (long long)latent_2d->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * latent_t = ggml_graph_get_tensor(gf, "latent_t");
-    if (latent_t) {
-        std::vector<float> data(ggml_nelements(latent_t));
-        ggml_backend_tensor_get(latent_t, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: latent_t shape [%lld, %lld], strides [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)latent_t->ne[0], (long long)latent_t->ne[1],
-                (long long)latent_t->nb[0], (long long)latent_t->nb[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * latent_cont = ggml_graph_get_tensor(gf, "latent_cont");
-    if (latent_cont) {
-        std::vector<float> data(ggml_nelements(latent_cont));
-        ggml_backend_tensor_get(latent_cont, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: latent_cont shape [%lld, %lld], strides [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)latent_cont->ne[0], (long long)latent_cont->ne[1],
-                (long long)latent_cont->nb[0], (long long)latent_cont->nb[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_cb0_codes = ggml_graph_get_tensor(gf, "rest_cb0_codes");
-    if (rest_cb0_codes) {
-        std::vector<int32_t> data(ggml_nelements(rest_cb0_codes));
-        ggml_backend_tensor_get(rest_cb0_codes, data.data(), 0, data.size() * sizeof(int32_t));
-        fprintf(stderr, "DEBUG: rest_cb0_codes shape [%lld], first 5: %d %d %d %d %d\n",
-                (long long)rest_cb0_codes->ne[0],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_cb0_emb_raw = ggml_graph_get_tensor(gf, "rest_cb0_emb_raw");
-    if (rest_cb0_emb_raw) {
-        std::vector<float> data(ggml_nelements(rest_cb0_emb_raw));
-        ggml_backend_tensor_get(rest_cb0_emb_raw, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_cb0_emb_raw shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_cb0_emb_raw->ne[0], (long long)rest_cb0_emb_raw->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_cb0_emb_2d = ggml_graph_get_tensor(gf, "rest_cb0_emb_2d");
-    if (rest_cb0_emb_2d) {
-        std::vector<float> data(ggml_nelements(rest_cb0_emb_2d));
-        ggml_backend_tensor_get(rest_cb0_emb_2d, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_cb0_emb_2d shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_cb0_emb_2d->ne[0], (long long)rest_cb0_emb_2d->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_sum_tensor = ggml_graph_get_tensor(gf, "rest_sum");
-    if (rest_sum_tensor) {
-        std::vector<float> data(ggml_nelements(rest_sum_tensor));
-        ggml_backend_tensor_get(rest_sum_tensor, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_sum shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_sum_tensor->ne[0], (long long)rest_sum_tensor->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * rest_sum_cont_tensor = ggml_graph_get_tensor(gf, "rest_sum_cont");
-    if (rest_sum_cont_tensor) {
-        std::vector<float> data(ggml_nelements(rest_sum_cont_tensor));
-        ggml_backend_tensor_get(rest_sum_cont_tensor, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_sum_cont shape [%lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_sum_cont_tensor->ne[0], (long long)rest_sum_cont_tensor->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    if (model_.vq_rest_output_proj) {
-        size_t nbytes = ggml_nbytes(model_.vq_rest_output_proj);
-        std::vector<uint8_t> raw_data(nbytes);
-        ggml_backend_tensor_get(model_.vq_rest_output_proj, raw_data.data(), 0, nbytes);
-        std::vector<float> data(ggml_nelements(model_.vq_rest_output_proj));
-        if (model_.vq_rest_output_proj->type == GGML_TYPE_F16) {
-            for (size_t i = 0; i < data.size(); ++i) {
-                data[i] = ggml_fp16_to_fp32(((ggml_fp16_t*)raw_data.data())[i]);
-            }
-        } else {
-            memcpy(data.data(), raw_data.data(), nbytes);
-        }
-        fprintf(stderr, "DEBUG: vq_rest_output_proj (model) shape [%lld, %lld, %lld], type=%d, first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)model_.vq_rest_output_proj->ne[0], (long long)model_.vq_rest_output_proj->ne[1],
-                (long long)model_.vq_rest_output_proj->ne[2], (int)model_.vq_rest_output_proj->type,
-                data[0], data[1], data[2], data[3], data[4]);
-        fprintf(stderr, "DEBUG: vq_rest_output_proj [256:261]: %.6f %.6f %.6f %.6f %.6f\n",
-                data[256], data[257], data[258], data[259], data[260]);
-        fprintf(stderr, "DEBUG: vq_rest_output_proj [512:517]: %.6f %.6f %.6f %.6f %.6f\n",
-                data[512], data[513], data[514], data[515], data[516]);
-    }
-    
-    struct ggml_tensor * rest_proj_tensor = ggml_graph_get_tensor(gf, "rest_proj");
-    if (rest_proj_tensor) {
-        std::vector<float> data(ggml_nelements(rest_proj_tensor));
-        ggml_backend_tensor_get(rest_proj_tensor, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: rest_proj shape [%lld, %lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)rest_proj_tensor->ne[0], (long long)rest_proj_tensor->ne[1], (long long)rest_proj_tensor->ne[2],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * vq_tensor = ggml_graph_get_tensor(gf, "vq_output");
-    if (vq_tensor) {
-        std::vector<float> vq_data(ggml_nelements(vq_tensor));
-        ggml_backend_tensor_get(vq_tensor, vq_data.data(), 0, vq_data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: VQ output shape [%lld, %lld, %lld], first 5: %.4f %.4f %.4f %.4f %.4f\n",
-                (long long)vq_tensor->ne[0], (long long)vq_tensor->ne[1], (long long)vq_tensor->ne[2],
-                vq_data[0], vq_data[1], vq_data[2], vq_data[3], vq_data[4]);
-        FILE * f = fopen("debug_vq_output.bin", "wb");
-        if (f) {
-            fwrite(vq_data.data(), sizeof(float), vq_data.size(), f);
-            fclose(f);
-        }
-    } else {
-        fprintf(stderr, "DEBUG: vq_output tensor not found\n");
-    }
-    
-    struct ggml_tensor * pre_conv_tensor = ggml_graph_get_tensor(gf, "pre_conv_output");
-    if (pre_conv_tensor) {
-        std::vector<float> pre_conv_data(ggml_nelements(pre_conv_tensor));
-        ggml_backend_tensor_get(pre_conv_tensor, pre_conv_data.data(), 0, pre_conv_data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: pre_conv output shape [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)pre_conv_tensor->ne[0], (long long)pre_conv_tensor->ne[1], (long long)pre_conv_tensor->ne[2],
-                pre_conv_data[0], pre_conv_data[1], pre_conv_data[2], pre_conv_data[3], pre_conv_data[4]);
-        FILE * f = fopen("debug_pre_conv_output.bin", "wb");
-        if (f) {
-            fwrite(pre_conv_data.data(), sizeof(float), pre_conv_data.size(), f);
-            fclose(f);
-        }
-    } else {
-        fprintf(stderr, "DEBUG: pre_conv_output tensor not found\n");
-    }
-    
-    struct ggml_tensor * pre_conv_reshaped = ggml_graph_get_tensor(gf, "pre_conv_reshaped");
-    if (pre_conv_reshaped) {
-        std::vector<float> data(ggml_nelements(pre_conv_reshaped));
-        ggml_backend_tensor_get(pre_conv_reshaped, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: pre_conv_reshaped shape [%lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)pre_conv_reshaped->ne[0], (long long)pre_conv_reshaped->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    if (model_.pre_tfm_input_proj_w) {
-        fprintf(stderr, "DEBUG: pre_tfm_input_proj_w shape [%lld, %lld]\n",
-                (long long)model_.pre_tfm_input_proj_w->ne[0], (long long)model_.pre_tfm_input_proj_w->ne[1]);
-    }
-    
-    fprintf(stderr, "DEBUG: layer0 weights loaded: attn_norm=%p, attn_q=%p, attn_k=%p, attn_v=%p, attn_out=%p\n",
-            (void*)model_.pre_tfm_layers[0].attn_norm_w,
-            (void*)model_.pre_tfm_layers[0].attn_q_w,
-            (void*)model_.pre_tfm_layers[0].attn_k_w,
-            (void*)model_.pre_tfm_layers[0].attn_v_w,
-            (void*)model_.pre_tfm_layers[0].attn_output_w);
-    fprintf(stderr, "DEBUG: layer0 ffn weights: norm=%p, gate=%p, up=%p, down=%p\n",
-            (void*)model_.pre_tfm_layers[0].ffn_norm_w,
-            (void*)model_.pre_tfm_layers[0].ffn_gate_w,
-            (void*)model_.pre_tfm_layers[0].ffn_up_w,
-            (void*)model_.pre_tfm_layers[0].ffn_down_w);
-    
-    struct ggml_tensor * pre_tfm_input = ggml_graph_get_tensor(gf, "pre_tfm_input");
-    if (pre_tfm_input) {
-        std::vector<float> data(ggml_nelements(pre_tfm_input));
-        ggml_backend_tensor_get(pre_tfm_input, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: pre_tfm_input shape [%lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)pre_tfm_input->ne[0], (long long)pre_tfm_input->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * layer0_output = ggml_graph_get_tensor(gf, "layer0_output");
-    if (layer0_output) {
-        std::vector<float> data(ggml_nelements(layer0_output));
-        ggml_backend_tensor_get(layer0_output, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: layer0_output shape [%lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)layer0_output->ne[0], (long long)layer0_output->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-    }
-    
-    struct ggml_tensor * pre_tfm_tensor = ggml_graph_get_tensor(gf, "pre_tfm_output");
-    if (pre_tfm_tensor) {
-        std::vector<float> data(ggml_nelements(pre_tfm_tensor));
-        ggml_backend_tensor_get(pre_tfm_tensor, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: pre_tfm output shape [%lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)pre_tfm_tensor->ne[0], (long long)pre_tfm_tensor->ne[1],
-                data[0], data[1], data[2], data[3], data[4]);
-        FILE * f = fopen("debug_pre_tfm_output.bin", "wb");
-        if (f) {
-            fwrite(data.data(), sizeof(float), data.size(), f);
-            fclose(f);
-        }
-    }
-    
-    const char * up_step_names[] = {"up0_conv_t", "up0_dwconv", "up0_norm", "up0_pwconv1", "up0_gelu", "up0_pwconv2", "up0_gamma"};
-    for (int i = 0; i < 7; ++i) {
-        struct ggml_tensor * t = ggml_graph_get_tensor(gf, up_step_names[i]);
-        if (t) {
-            std::vector<float> data(ggml_nelements(t));
-            ggml_backend_tensor_get(t, data.data(), 0, data.size() * sizeof(float));
-            fprintf(stderr, "DEBUG: %s shape [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                    up_step_names[i],
-                    (long long)t->ne[0], (long long)t->ne[1], (long long)t->ne[2],
-                    data[0], data[1], data[2], data[3], data[4]);
-            char fname[64];
-            snprintf(fname, sizeof(fname), "debug_%s.bin", up_step_names[i]);
-            FILE * f = fopen(fname, "wb");
-            if (f) {
-                fwrite(data.data(), sizeof(float), data.size(), f);
-                fclose(f);
-            }
-        }
-    }
-    
-    struct ggml_tensor * upsample_tensor = ggml_graph_get_tensor(gf, "upsample_output");
-    if (upsample_tensor) {
-        std::vector<float> data(ggml_nelements(upsample_tensor));
-        ggml_backend_tensor_get(upsample_tensor, data.data(), 0, data.size() * sizeof(float));
-        fprintf(stderr, "DEBUG: upsample output shape [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                (long long)upsample_tensor->ne[0], (long long)upsample_tensor->ne[1], (long long)upsample_tensor->ne[2],
-                data[0], data[1], data[2], data[3], data[4]);
-        FILE * f = fopen("debug_upsample_output.bin", "wb");
-        if (f) {
-            fwrite(data.data(), sizeof(float), data.size(), f);
-            fclose(f);
-        }
-    }
-    
-    const char * dec_names[] = {"dec0_output", "dec1_after_snake", "dec1_after_conv_t_raw", "dec1_after_trim", "dec1_after_bias", "dec1_output", "dec2_output", "dec3_output", "dec4_output", "dec5_output", "dec6_output"};
-    for (int i = 0; i < 11; ++i) {
-        struct ggml_tensor * t = ggml_graph_get_tensor(gf, dec_names[i]);
-        if (t) {
-            std::vector<float> data(ggml_nelements(t));
-            ggml_backend_tensor_get(t, data.data(), 0, data.size() * sizeof(float));
-            fprintf(stderr, "DEBUG: %s shape [%lld, %lld, %lld], first 5: %.6f %.6f %.6f %.6f %.6f\n",
-                    dec_names[i],
-                    (long long)t->ne[0], (long long)t->ne[1], (long long)t->ne[2],
-                    data[0], data[1], data[2], data[3], data[4]);
-            char fname[64];
-            snprintf(fname, sizeof(fname), "debug_%s.bin", dec_names[i]);
-            FILE * f = fopen(fname, "wb");
-            if (f) {
-                fwrite(data.data(), sizeof(float), data.size(), f);
-                fclose(f);
-            }
-        }
     }
     
     struct ggml_tensor * audio_tensor = ggml_graph_get_tensor(gf, "audio");
