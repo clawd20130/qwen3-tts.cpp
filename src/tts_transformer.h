@@ -16,11 +16,34 @@ namespace qwen3_tts {
 
 #ifdef QWEN3_TTS_TIMING
 struct tts_timing {
-    double t_prefill_build_ms = 0;
-    double t_prefill_forward_ms = 0;
-    double t_talker_forward_ms = 0;
-    double t_code_pred_ms = 0;
+    // Prefill phase
+    double t_prefill_build_ms = 0;      // build_prefill_graph (embedding lookups, text projection)
+    double t_prefill_forward_ms = 0;    // forward_prefill total
+    double t_prefill_graph_build_ms = 0;  // build_prefill_forward_graph
+    double t_prefill_graph_alloc_ms = 0;  // sched_alloc_graph
+    double t_prefill_compute_ms = 0;      // sched_graph_compute
+    double t_prefill_data_ms = 0;         // tensor_set + tensor_get + reset
+
+    // Talker forward_step totals (accumulated across all frames)
+    double t_talker_forward_ms = 0;       // total time in forward_step()
+    double t_talker_graph_build_ms = 0;   // build_step_graph
+    double t_talker_graph_alloc_ms = 0;   // sched_alloc_graph
+    double t_talker_compute_ms = 0;       // sched_graph_compute
+    double t_talker_data_ms = 0;          // tensor_set + tensor_get + reset
+
+    // Code predictor totals (accumulated across all frames)
+    double t_code_pred_ms = 0;            // total predict_codes_autoregressive
+    double t_code_pred_init_ms = 0;       // init/clear KV cache + CB0 embed lookup
+    double t_code_pred_prefill_ms = 0;    // code pred prefill (2-token, per frame)
+    double t_code_pred_steps_ms = 0;      // code pred autoregressive steps (14 steps, per frame)
+    double t_code_pred_graph_build_ms = 0;  // graph build (prefill + steps combined)
+    double t_code_pred_graph_alloc_ms = 0;  // sched_alloc_graph
+    double t_code_pred_compute_ms = 0;      // sched_graph_compute
+    double t_code_pred_data_ms = 0;         // tensor_set + tensor_get + reset
+
+    // Embed lookups in generate() loop
     double t_embed_lookup_ms = 0;
+
     int32_t n_frames = 0;
     double t_generate_total_ms = 0;
 };
@@ -289,6 +312,10 @@ private:
     
     // Cached hidden states from last forward pass
     std::vector<float> last_hidden_;
+
+#ifdef QWEN3_TTS_TIMING
+    tts_timing * timing_ = nullptr;
+#endif
 };
 
 // Free model resources
