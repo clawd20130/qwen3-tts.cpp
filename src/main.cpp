@@ -12,9 +12,11 @@ void print_usage(const char * program) {
     fprintf(stderr, "  -t, --text <text>      Text to synthesize (required)\n");
     fprintf(stderr, "  -o, --output <file>    Output WAV file (default: output.wav)\n");
     fprintf(stderr, "  -r, --reference <file> Reference audio for voice cloning\n");
-    fprintf(stderr, "  --temperature <val>    Sampling temperature (default: 0.7)\n");
-    fprintf(stderr, "  --top-p <val>          Top-p sampling (default: 0.9)\n");
+    fprintf(stderr, "  --temperature <val>    Sampling temperature (default: 0.9, 0=greedy)\n");
+    fprintf(stderr, "  --top-k <n>            Top-k sampling (default: 50, 0=disabled)\n");
+    fprintf(stderr, "  --top-p <val>          Top-p sampling (default: 1.0)\n");
     fprintf(stderr, "  --max-tokens <n>       Maximum audio tokens (default: 4096)\n");
+    fprintf(stderr, "  --repetition-penalty <val> Repetition penalty (default: 1.05)\n");
     fprintf(stderr, "  -j, --threads <n>      Number of threads (default: 4)\n");
     fprintf(stderr, "  -h, --help             Show this help\n");
     fprintf(stderr, "\n");
@@ -68,6 +70,12 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.temperature = std::stof(argv[i]);
+        } else if (arg == "--top-k") {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: missing top-k value\n");
+                return 1;
+            }
+            params.top_k = std::stoi(argv[i]);
         } else if (arg == "--top-p") {
             if (++i >= argc) {
                 fprintf(stderr, "Error: missing top-p value\n");
@@ -80,6 +88,12 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.max_audio_tokens = std::stoi(argv[i]);
+        } else if (arg == "--repetition-penalty") {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: missing repetition-penalty value\n");
+                return 1;
+            }
+            params.repetition_penalty = std::stof(argv[i]);
         } else if (arg == "-j" || arg == "--threads") {
             if (++i >= argc) {
                 fprintf(stderr, "Error: missing threads value\n");

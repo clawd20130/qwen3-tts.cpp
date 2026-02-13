@@ -242,7 +242,9 @@ public:
     // codebook_0_token: the codebook 0 token (used to create 2-token prefill input)
     // output: generated codes for codebooks 1-15 [15]
     bool predict_codes_autoregressive(const float * hidden, int32_t codebook_0_token, 
-                                       std::vector<int32_t> & output);
+                                       std::vector<int32_t> & output,
+                                       float temperature = 0.9f,
+                                       int32_t top_k = 50);
     
     // Generate speech codes autoregressively
     // text_tokens: input text token IDs [n_tokens]
@@ -252,7 +254,10 @@ public:
     bool generate(const int32_t * text_tokens, int32_t n_tokens,
                   const float * speaker_embd, int32_t max_len,
                   std::vector<int32_t> & output,
-                  int32_t language_id = 2050);
+                  int32_t language_id = 2050,
+                  float repetition_penalty = 1.05f,
+                  float temperature = 0.9f,
+                  int32_t top_k = 50);
     
     const tts_transformer_config & get_config() const { return model_.config; }
     

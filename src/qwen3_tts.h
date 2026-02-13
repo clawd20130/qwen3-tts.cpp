@@ -17,10 +17,13 @@ struct tts_params {
     int32_t max_audio_tokens = 4096;
     
     // Temperature for sampling (0 = greedy)
-    float temperature = 0.7f;
+    float temperature = 0.9f;
     
     // Top-p sampling
-    float top_p = 0.9f;
+    float top_p = 1.0f;
+    
+    // Top-k sampling (0 = disabled)
+    int32_t top_k = 50;
     
     // Number of threads
     int32_t n_threads = 4;
@@ -30,6 +33,9 @@ struct tts_params {
     
     // Print timing information
     bool print_timing = true;
+    
+    // Repetition penalty for CB0 token generation (HuggingFace style)
+    float repetition_penalty = 1.05f;
     
 };
 
