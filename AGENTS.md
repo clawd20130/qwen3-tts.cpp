@@ -19,6 +19,8 @@ qwen3-tts.cpp/
     audio_tokenizer_decoder.{h,cpp}  # WavTokenizer vocoder
     gguf_loader.{h,cpp}        # GGUF model loading
   tests/                        # Component tests
+    test_codebook.cpp
+    test_vq_only.cpp
     test_tokenizer.cpp
     test_encoder.cpp
     test_transformer.cpp        # Deterministic reference comparison
@@ -37,10 +39,11 @@ qwen3-tts.cpp/
 ## Build System
 
 - **CMake 3.14+** with C++17
-- External dependency: GGML library (expected at `/root/ggml`, configurable via `GGML_DIR`)
-- Build: `mkdir build && cd build && cmake .. && make -j4`
-- Timing build: `cmake .. -DQWEN3_TTS_TIMING=ON && make -j4`
-- All GGML headers are in `$GGML_DIR/include`, libraries in `$GGML_DIR/build/src`
+- GGML is vendored under `./ggml` and linked from `./ggml/build/src`
+- Build GGML first: `cmake -S ggml -B ggml/build -DGGML_METAL=ON && cmake --build ggml/build -j4`
+- Build project: `cmake -S . -B build && cmake --build build -j4`
+- Timing build: `cmake -S . -B build -DQWEN3_TTS_TIMING=ON && cmake --build build -j4`
+- GGML headers are in `./ggml/include`
 
 ## Coding Conventions
 
@@ -81,6 +84,12 @@ ggml_backend_sched_reset(state_.sched);
 ```
 
 Important: `ggml_cast` to F32 is needed before `ggml_mul_mat` when weight tensors are F16 (specifically `ffn_down` in both talker and code predictor layers).
+
+Backend initialization and scheduling notes:
+
+- Use `init_preferred_backend()` (`src/gguf_loader.cpp`) to select backend in order: `IGPU -> GPU -> ACCEL -> CPU`
+- If the selected runtime backend is not CPU, add a CPU backend as scheduler fallback (`backend_cpu`) when calling `ggml_backend_sched_new(...)`
+- Decoder follows the same backend preference; load decoder weights with `GGML_BACKEND_DEVICE_TYPE_IGPU` preference for Metal-first execution
 
 ### Model Architecture
 
@@ -156,9 +165,9 @@ bash scripts/run_all_tests.sh           # Full suite
 ## Known Limitations
 
 - F16 model weights cause autoregressive divergence vs Python's float32 — speech codes differ but audio is perceptually equivalent
-- Speaker encoder has DEBUG printf statements (from earlier debugging)
 - M-RoPE uses 1D positions (equivalent for single-batch, may differ for batched inference)
-- GGML path is hardcoded in CMakeLists.txt
+- `--top-p` is parsed in CLI params but currently not used in transformer sampling
+- Top-level CMake expects vendored GGML at `./ggml`
 
 ## Performance Profile
 

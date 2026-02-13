@@ -86,6 +86,7 @@ struct speaker_encoder_model {
 // Compute state for speaker encoder
 struct speaker_encoder_state {
     ggml_backend_t backend = nullptr;
+    ggml_backend_t backend_cpu = nullptr;
     ggml_backend_sched_t sched = nullptr;
     std::vector<uint8_t> compute_meta;
 };

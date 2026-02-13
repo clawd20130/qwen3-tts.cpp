@@ -8,8 +8,9 @@ Runs the full TTS pipeline — text tokenization, speaker encoding, transformer 
 
 - Full text-to-speech pipeline in C++17 with GGML backend
 - Voice cloning from reference audio (ECAPA-TDNN x-vector extraction)
-- Greedy and sampled decoding (temperature, top-p)
+- Greedy and sampled decoding (temperature, top-k, repetition penalty)
 - GGUF model format (F16 and Q8_0 quantization)
+- Runtime backend selection with GPU/Metal preference and CPU fallback
 - Deterministic reference tests comparing C++ output against Python
 - Compile-time timing instrumentation with zero overhead in normal builds
 
@@ -23,19 +24,20 @@ Runs the full TTS pipeline — text tokenization, speaker encoding, transformer 
 ## Build
 
 ```bash
-# Build GGML (if not already)
-git clone https://github.com/ggml-org/ggml.git /root/ggml
-cd /root/ggml && mkdir build && cd build && cmake .. && make -j4
-
-# Build qwen3-tts.cpp
 git clone https://github.com/predict-woo/qwen3-tts.cpp.git
 cd qwen3-tts.cpp
-mkdir build && cd build
-cmake ..
-make -j4
+git submodule update --init --recursive
+
+# Build GGML (vendored in ./ggml)
+cmake -S ggml -B ggml/build -DGGML_METAL=ON
+cmake --build ggml/build -j4
+
+# Build qwen3-tts.cpp
+cmake -S . -B build
+cmake --build build -j4
 ```
 
-> **Note:** The CMakeLists.txt expects GGML at `/root/ggml`. Set `GGML_DIR` to override.
+> **Note:** The top-level CMake currently expects GGML in `./ggml` with libraries under `./ggml/build/src`.
 
 ## Model Conversion
 
@@ -81,10 +83,22 @@ Place both `.gguf` files in a `models/` directory.
 | `-t, --text <text>` | Text to synthesize | (required) |
 | `-o, --output <file>` | Output WAV file path | `output.wav` |
 | `-r, --reference <file>` | Reference audio for voice cloning | (none) |
-| `--temperature <val>` | Sampling temperature (0 = greedy) | 0.7 |
-| `--top-p <val>` | Top-p nucleus sampling | 0.9 |
+| `--temperature <val>` | Sampling temperature (0 = greedy) | 0.9 |
+| `--top-k <n>` | Top-k sampling (0 = disabled) | 50 |
+| `--top-p <val>` | Top-p sampling | 1.0 |
 | `--max-tokens <n>` | Maximum audio frames to generate | 4096 |
+| `--repetition-penalty <val>` | Repetition penalty on codebook-0 token generation | 1.05 |
 | `-j, --threads <n>` | Number of compute threads | 4 |
+
+`--top-p` is currently parsed by the CLI but not yet wired into transformer sampling.
+
+### Backend Selection
+
+At runtime, each component logs its selected backend (for example, `TTSTransformer backend: MTL0` or `BLAS`).
+
+- Preferred order: `IGPU` -> `GPU` -> `ACCEL` -> `CPU`
+- Encoder and transformer can run on Metal/other accelerators with CPU fallback in the scheduler
+- Decoder now follows the same backend preference and will use Metal when available
 
 ## Architecture
 

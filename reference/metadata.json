@@ -1,6 +1,6 @@
 {
-  "model_path": "/root/qwen-3-tts-ggml/models/Qwen3-TTS-12Hz-0.6B-Base",
-  "ref_audio_path": "/root/qwen-3-tts-ggml/clone.wav",
+  "model_path": "/Users/andyye/dev/qwen3-tts.cpp/models/Qwen3-TTS-12Hz-0.6B-Base",
+  "ref_audio_path": "/Users/andyye/dev/qwen3-tts.cpp/clone.wav",
   "ref_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
   "synth_text": "Hello.",
   "outputs": [
@@ -57,18 +57,18 @@
       "name": "decoded_audio",
       "path": "decoded_audio.bin",
       "shape": [
-        120405
+        120960
       ],
       "dtype": "float32",
-      "size_bytes": 481620,
+      "size_bytes": 483840,
       "sample_rate": 24000,
-      "duration_seconds": 5.016875
+      "duration_seconds": 5.04
     },
     {
       "name": "output_wav",
       "path": "output.wav",
       "sample_rate": 24000,
-      "duration_seconds": 5.016875,
+      "duration_seconds": 5.04,
       "format": "WAV PCM float32"
     }
   ],

@@ -27,6 +27,10 @@ TTSTransformer::~TTSTransformer() {
         ggml_backend_free(state_.backend);
         state_.backend = nullptr;
     }
+    if (state_.backend_cpu) {
+        ggml_backend_free(state_.backend_cpu);
+        state_.backend_cpu = nullptr;
+    }
 }
 
 bool TTSTransformer::load_model(const std::string & model_path) {
@@ -64,14 +68,28 @@ bool TTSTransformer::load_model(const std::string & model_path) {
     gguf_free(ctx);
     if (meta_ctx) ggml_free(meta_ctx);
     
-    state_.backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+    state_.backend = init_preferred_backend("TTSTransformer", &error_msg_);
     if (!state_.backend) {
-        error_msg_ = "Failed to initialize CPU backend";
         return false;
     }
+    ggml_backend_dev_t device = ggml_backend_get_device(state_.backend);
+    const char * device_name = device ? ggml_backend_dev_name(device) : "Unknown";
+    fprintf(stderr, "  TTSTransformer backend: %s\n", device_name);
+
+    if (device && ggml_backend_dev_type(device) != GGML_BACKEND_DEVICE_TYPE_CPU) {
+        state_.backend_cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        if (!state_.backend_cpu) {
+            error_msg_ = "Failed to initialize CPU fallback backend for TTSTransformer";
+            return false;
+        }
+    }
     
-    std::vector<ggml_backend_t> backends = { state_.backend };
-    state_.sched = ggml_backend_sched_new(backends.data(), nullptr, 1, QWEN3_TTS_MAX_NODES, false, true);
+    std::vector<ggml_backend_t> backends;
+    backends.push_back(state_.backend);
+    if (state_.backend_cpu) {
+        backends.push_back(state_.backend_cpu);
+    }
+    state_.sched = ggml_backend_sched_new(backends.data(), nullptr, (int)backends.size(), QWEN3_TTS_MAX_NODES, false, true);
     if (!state_.sched) {
         error_msg_ = "Failed to create backend scheduler";
         return false;
@@ -486,9 +504,8 @@ bool TTSTransformer::create_tensors(struct gguf_context * ctx) {
  }
 
 bool TTSTransformer::load_tensor_data(const std::string & path, struct gguf_context * ctx) {
-    ggml_backend_t backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+    ggml_backend_t backend = init_preferred_backend("TTSTransformer", &error_msg_);
     if (!backend) {
-        error_msg_ = "Failed to initialize CPU backend for loading";
         return false;
     }
     

@@ -1,6 +1,6 @@
 {
-  "model_path": "/root/qwen-3-tts-ggml/models/Qwen3-TTS-12Hz-0.6B-Base",
-  "reference_audio": "/root/qwen-3-tts-ggml/clone.wav",
+  "model_path": "/Users/andyye/dev/qwen3-tts.cpp/models/Qwen3-TTS-12Hz-0.6B-Base",
+  "reference_audio": "/Users/andyye/dev/qwen3-tts.cpp/clone.wav",
   "reference_text": "Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it! And thanks to you.",
   "synthesis_text": "Hello.",
   "language": "English",
@@ -67,7 +67,7 @@
       3072
     ],
     "decoded_audio": [
-      120405
+      120960
     ]
   },
   "outputs": {
@@ -88,7 +88,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 4096,
-      "sha256": "7dbe24ecdbfcb5522fcab082ec005d94b1697e262df4a875504118dfa652b214"
+      "sha256": "61b45d744253a62f1f6e7fa804cf95b1c043568a13e96663bbb15b5eebc9e610"
     },
     "det_prefill_embedding.bin": {
       "path": "det_prefill_embedding.bin",
@@ -99,7 +99,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 40960,
-      "sha256": "b9392a704c67d2cbda204246a5e0cd6cd51ef75a1b2ee34fd606d13cfd776dfd"
+      "sha256": "4b76b0af54ffe7edb476d0e2ce97408e730446579033d28f60232264584222fc"
     },
     "det_speech_codes.bin": {
       "path": "det_speech_codes.bin",
@@ -109,7 +109,7 @@
       ],
       "dtype": "int64",
       "size_bytes": 8064,
-      "sha256": "3fd6a29c6927e1cacb14cca10e546b4d64637c03b1c378d095a656464f9f16b2"
+      "sha256": "f0a9f60c562c2d928335307bde7b5350a39032f6d3c4b942db3b1b36f7d81d9e"
     },
     "det_hidden_states.bin": {
       "path": "det_hidden_states.bin",
@@ -119,7 +119,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 258048,
-      "sha256": "a4a51fa0032a25903f9657600c878228b1d2451849f6ad6f01f279cb538abfab"
+      "sha256": "8bc3b19d786d084299d730ae150f87dd61eba99fef23ad2c76cb8d53c302a2fc"
     },
     "det_first_frame_logits.bin": {
       "path": "det_first_frame_logits.bin",
@@ -129,16 +129,16 @@
       ],
       "dtype": "float32",
       "size_bytes": 12288,
-      "sha256": "da02fc89451fc1521940fe575e74551d9920ca9a79f8466aa3ab226295857c81"
+      "sha256": "2b7ee95bf2de54288915386f308aa1960b5d2ad14dfc4ea2c507bd80f769ba17"
     },
     "det_decoded_audio.bin": {
       "path": "det_decoded_audio.bin",
       "shape": [
-        120405
+        120960
       ],
       "dtype": "float32",
-      "size_bytes": 481620,
-      "sha256": "482b3ceb5fab536dcdffc80c94be193e963b8d9d57710e77b36e2ba30b99a3e7"
+      "size_bytes": 483840,
+      "sha256": "272629dfd827d37068aede054c1c3ecb81126c199bdcdd4f5ef0f3301a340c87"
     },
     "det_trailing_text.bin": {
       "path": "det_trailing_text.bin",
@@ -149,7 +149,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 8192,
-      "sha256": "1f4b9d63069fe9e984b49d45b73536f56701be90a1a560fed411ffe205671a28"
+      "sha256": "0be99c99c0607ed5c53a0a00053d3f1bc79c11c5a7147ef494d19942a493a1e7"
     },
     "det_tts_pad_embed.bin": {
       "path": "det_tts_pad_embed.bin",
@@ -160,7 +160,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 4096,
-      "sha256": "5601144c3b8cf4875be3bcf03aa4ffe31a52466e1eb5bec01a30776eaec09a8e"
+      "sha256": "0289fcdb42b3c45e829204dd7de66fd40e1453c00bbce21b3eb866a84d9090df"
     },
     "det_role_embed.bin": {
       "path": "det_role_embed.bin",
@@ -171,7 +171,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 12288,
-      "sha256": "2a26eb0d0c74de85e94a314b4f7410953fa5783295a866e626eafdd130ebe063"
+      "sha256": "a86c059b76c30723e14c1db6af475d19f38e0af62256f9e7da2bbb35a4e53d14"
     },
     "det_codec_prefill_embed.bin": {
       "path": "det_codec_prefill_embed.bin",
@@ -182,7 +182,7 @@
       ],
       "dtype": "float32",
       "size_bytes": 24576,
-      "sha256": "a355ec5eb13d70eae91270b1b1425dc48da0eb8c75b3cb45651c68c6c3b23b2f"
+      "sha256": "a500ed897cf2c50f35371bde2d77591dbf188b1887a9273cdc6c14d8756b1be5"
     },
     "det_tts_overlay.bin": {
       "path": "det_tts_overlay.bin",
@@ -193,15 +193,15 @@
       ],
       "dtype": "float32",
       "size_bytes": 24576,
-      "sha256": "ed6cbd308df239a9ef827ff96edb3e71a8ffd6b4ba085297d355b3c97e6999d0"
+      "sha256": "807974ed068af06247d7efdf153364637d9d5973bdb6ee9e1a139e3fabe0bab3"
     }
   },
   "wav": {
     "path": "det_output.wav",
-    "sha256": "ba9a1ed319f0d946e50282038f64a7409efedab4373a01522c2aa7bcb6850e02",
+    "sha256": "18422e7f86adfdffa81dd3fbfa16e7c554c37b648550409697a9007c9fed2e50",
     "sample_rate": 24000,
-    "num_samples": 120405,
-    "duration_seconds": 5.016875
+    "num_samples": 120960,
+    "duration_seconds": 5.04
   },
   "prefill_token_types": "det_prefill_token_types.json"
 }

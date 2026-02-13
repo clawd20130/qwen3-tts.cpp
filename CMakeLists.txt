@@ -22,7 +22,7 @@ endif()
 find_package(Threads REQUIRED)
 
 # GGML library paths
-set(GGML_DIR "/root/ggml")
+set(GGML_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ggml")
 set(GGML_BUILD_DIR "${GGML_DIR}/build")
 
 # Text tokenizer library
