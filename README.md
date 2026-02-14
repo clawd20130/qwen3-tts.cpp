@@ -1,6 +1,6 @@
 # qwen3-tts.cpp
 
-C++ inference for [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-0.6B-Base) using the [GGML](https://github.com/ggml-org/ggml) tensor library.
+C++ inference for [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) using the [GGML](https://github.com/ggml-org/ggml) tensor library.
 
 Runs the full TTS pipeline — text tokenization, speaker encoding, transformer code generation, and vocoder decoding — in pure C++17 without Python or PyTorch at inference time.
 
@@ -21,6 +21,78 @@ Runs the full TTS pipeline — text tokenization, speaker encoding, transformer 
 - [GGML](https://github.com/ggml-org/ggml) built from source
 - Python 3.10+ with [uv](https://github.com/astral-sh/uv) (model conversion only)
 
+## Quickstart (macOS, copy/paste)
+
+Run these commands from a fresh clone:
+
+```bash
+git clone https://github.com/predict-woo/qwen3-tts.cpp.git
+cd qwen3-tts.cpp
+git submodule update --init --recursive
+
+# 1) Build GGML with Metal
+cmake -S ggml -B ggml/build -DGGML_METAL=ON
+cmake --build ggml/build -j4
+
+# 2) Build qwen3-tts.cpp
+cmake -S . -B build
+cmake --build build -j4
+
+# 3) Create a uv Python environment for setup/conversion tools
+uv venv .venv
+source .venv/bin/activate
+
+# 4) Install Python dependencies
+uv pip install --upgrade pip
+uv pip install huggingface_hub gguf torch safetensors numpy tqdm coremltools
+
+# Optional if model access requires auth:
+# huggingface-cli login
+
+# 5) Download and generate all runtime model artifacts
+python scripts/setup_pipeline_models.py
+
+# 6) Basic synthesis example
+./build/qwen3-tts-cli \
+  -m models \
+  -t "Hello from qwen3-tts.cpp running on macOS with CoreML by default." \
+  -o examples/readme_example_basic.wav
+
+# 7) Voice-clone example using sample audio in this repo
+./build/qwen3-tts-cli \
+  -m models \
+  -r examples/readme_clone_input.wav \
+  -t "This is a voice cloning example generated from the sample audio file in this directory." \
+  -o examples/readme_example_clone.wav
+```
+
+Expected model artifacts after step 5:
+
+- `models/qwen3-tts-0.6b-f16.gguf`
+- `models/qwen3-tts-tokenizer-f16.gguf`
+- `models/coreml/code_predictor.mlpackage` (on macOS)
+
+Expected audio outputs after steps 6-7:
+
+- `examples/readme_example_basic.wav`
+- `examples/readme_example_clone.wav`
+
+Included voice-clone input/output pair (so users can compare directly):
+
+- Input reference audio: `examples/readme_clone_input.wav`
+- Generated output audio: `examples/readme_example_clone.wav`
+
+Audio preview (inline):
+
+<audio controls src="./examples/readme_clone_input.wav"></audio>
+<br/>
+<audio controls src="./examples/readme_example_clone.wav"></audio>
+
+If your Markdown renderer does not show inline controls, use direct links:
+
+- [Play input reference WAV](./examples/readme_clone_input.wav)
+- [Play generated output WAV](./examples/readme_example_clone.wav)
+
 ## Build
 
 ```bash
@@ -39,13 +111,28 @@ cmake --build build -j4
 
 > **Note:** The top-level CMake currently expects GGML in `./ggml` with libraries under `./ggml/build/src`.
 
-## Model Conversion
+## Model Setup (Recommended)
+
+Use the one-shot setup script:
+
+```bash
+source .venv/bin/activate
+python scripts/setup_pipeline_models.py
+```
+
+Useful flags:
+
+- `--force` re-downloads and re-generates all artifacts.
+- `--coreml auto|on|off` controls CoreML export behavior.
+- `--skip-download` skips HF download and uses existing local model dirs.
+
+## Manual Model Conversion (Advanced)
 
 Convert HuggingFace models to GGUF format:
 
 ```bash
 # Download the model
-huggingface-cli download Qwen/Qwen3-TTS-0.6B-Base \
+huggingface-cli download Qwen/Qwen3-TTS-12Hz-0.6B-Base \
     --local-dir models/Qwen3-TTS-12Hz-0.6B-Base
 
 # Convert TTS model (transformer + speaker encoder + tokenizer)
@@ -91,6 +178,9 @@ Place both `.gguf` files in a `models/` directory.
 | `-j, --threads <n>` | Number of compute threads | 4 |
 
 `--top-p` is currently parsed by the CLI but not yet wired into transformer sampling.
+
+On macOS, CoreML code predictor is enabled by default when `models/coreml/code_predictor.mlpackage` exists.
+Set `QWEN3_TTS_USE_COREML=0` to disable it. Low-memory mode is opt-in via `QWEN3_TTS_LOW_MEM=1`.
 
 ### Backend Selection
 
@@ -202,6 +292,6 @@ The code predictor (15 sequential forward passes per frame) accounts for ~71% of
 
 ## Acknowledgments
 
-- [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-0.6B-Base) by Alibaba Qwen team
+- [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) by Alibaba Qwen team
 - [GGML](https://github.com/ggml-org/ggml) tensor library by Georgi Gerganov
 - [WavTokenizer](https://github.com/jishengpeng/WavTokenizer) vocoder architecture

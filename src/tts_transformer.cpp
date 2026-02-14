@@ -10,6 +10,8 @@
 #include <random>
 #include <unordered_set>
 #include <cstdlib>
+#include <cctype>
+#include <sys/stat.h>
 
 namespace qwen3_tts {
 
@@ -53,8 +55,34 @@ bool TTSTransformer::load_model(const std::string & model_path) {
     skip_ggml_code_pred_layers_ = false;
 #if defined(__APPLE__)
     const char * use_coreml_env = std::getenv("QWEN3_TTS_USE_COREML");
-    if (use_coreml_env && use_coreml_env[0] != '\0' && use_coreml_env[0] != '0') {
-        skip_ggml_code_pred_layers_ = true;
+    bool coreml_disabled = false;
+    if (use_coreml_env && use_coreml_env[0] != '\0') {
+        std::string use_coreml = use_coreml_env;
+        std::transform(use_coreml.begin(), use_coreml.end(), use_coreml.begin(),
+                       [](unsigned char c) { return (char) std::tolower(c); });
+        coreml_disabled = use_coreml == "0" || use_coreml == "false" ||
+                          use_coreml == "off" || use_coreml == "no";
+    }
+
+    if (!coreml_disabled) {
+        std::string coreml_path;
+        const char * override_env = std::getenv("QWEN3_TTS_COREML_MODEL");
+        if (override_env && override_env[0] != '\0') {
+            coreml_path = override_env;
+        } else {
+            size_t slash = model_path.find_last_of("/\\");
+            const std::string model_dir = (slash == std::string::npos) ? "." : model_path.substr(0, slash);
+            coreml_path = model_dir + "/coreml/code_predictor.mlpackage";
+        }
+
+        struct stat st = {};
+        if (stat(coreml_path.c_str(), &st) == 0) {
+            // Skip GGML code-predictor weights when CoreML package is present.
+            skip_ggml_code_pred_layers_ = true;
+        } else if (use_coreml_env && use_coreml_env[0] != '\0') {
+            // Explicit opt-in should remain strict to surface configuration errors.
+            skip_ggml_code_pred_layers_ = true;
+        }
     }
 #endif
 
@@ -133,12 +161,23 @@ bool TTSTransformer::try_init_coreml_code_predictor(const std::string & model_pa
     coreml_code_predictor_path_.clear();
 
     const char * use_coreml_env = std::getenv("QWEN3_TTS_USE_COREML");
-    if (!use_coreml_env || use_coreml_env[0] == '\0' || use_coreml_env[0] == '0') {
+    bool coreml_disabled = false;
+    if (use_coreml_env && use_coreml_env[0] != '\0') {
+        std::string use_coreml = use_coreml_env;
+        std::transform(use_coreml.begin(), use_coreml.end(), use_coreml.begin(),
+                       [](unsigned char c) { return (char) std::tolower(c); });
+        coreml_disabled = use_coreml == "0" || use_coreml == "false" ||
+                          use_coreml == "off" || use_coreml == "no";
+    }
+
+    if (coreml_disabled) {
         return true;
     }
 
 #if !defined(__APPLE__)
-    fprintf(stderr, "  CoreML code predictor requested but this build is not on Apple platform\n");
+    if (use_coreml_env && use_coreml_env[0] != '\0') {
+        fprintf(stderr, "  CoreML code predictor requested but this build is not on Apple platform\n");
+    }
     return true;
 #else
     std::string coreml_path;
