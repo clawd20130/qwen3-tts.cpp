@@ -2,7 +2,7 @@
 
 C++ inference for [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) using the [GGML](https://github.com/ggml-org/ggml) tensor library.
 
-Runs the full TTS pipeline — text tokenization, speaker encoding, transformer code generation, and vocoder decoding — in pure C++17 without Python or PyTorch at inference time.
+Runs the full TTS pipeline in pure C++17, including text tokenization, speaker encoding, transformer code generation, and vocoder decoding, without Python or PyTorch at inference time.
 
 ## Features
 
@@ -218,8 +218,8 @@ speech codes ──► [Vocoder] ──► audio waveform (24kHz)
 
 The transformer generates speech codes in two stages per frame:
 
-1. **Talker** (28 layers, 16 heads, 1024 hidden) — produces a hidden state and codebook-0 logits
-2. **Code Predictor** (5 layers) — autoregressively generates codebooks 1-15 from the hidden state
+1. **Talker** (28 layers, 16 heads, 1024 hidden) produces a hidden state and codebook-0 logits.
+2. **Code Predictor** (5 layers) autoregressively generates codebooks 1-15 from that hidden state.
 
 The prefill embedding mirrors the Python pipeline exactly:
 - Positions 0-2: text-projected role tokens (`<|im_start|>`, `assistant`, `\n`)
