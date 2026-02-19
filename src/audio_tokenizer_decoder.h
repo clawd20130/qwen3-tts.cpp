@@ -181,6 +181,9 @@ public:
 private:
     // Build computation graph for decoding
     struct ggml_cgraph * build_graph(int32_t n_frames);
+    bool decode_single(const int32_t * codes, int32_t n_frames, int32_t position_offset,
+                       std::vector<float> & samples);
+    int64_t output_samples_for_frames(int32_t n_frames) const;
     
     // Apply Snake activation: x + (1/alpha) * sin^2(alpha * x)
     struct ggml_tensor * apply_snake(struct ggml_context * ctx,
