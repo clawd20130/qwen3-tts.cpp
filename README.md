@@ -114,6 +114,7 @@ cmake --build build -j4
 ```
 
 > **Note:** The top-level CMake currently expects GGML in `./ggml` with libraries under `./ggml/build/src`.
+> For NVIDIA CUDA, build GGML with `-DGGML_CUDA=ON` and run with `QWEN3_TTS_BACKEND=cuda`.
 
 ## Model Setup (Recommended)
 
