@@ -25,6 +25,7 @@ enum class backend_mode {
     AUTO,
     CPU,
     CUDA,
+    VULKAN,
 };
 
 bool iequals(const char * a, const char * b) {
@@ -68,40 +69,43 @@ backend_mode get_backend_mode_from_env() {
     if (iequals(env, "cuda")) {
         return backend_mode::CUDA;
     }
+    if (iequals(env, "vulkan") || iequals(env, "vk")) {
+        return backend_mode::VULKAN;
+    }
 
     fprintf(stderr, "  [backend] Unknown QWEN3_TTS_BACKEND=%s, using auto\n", env);
     return backend_mode::AUTO;
 }
 
-int get_cuda_device_index_from_env() {
+int get_backend_device_index_from_env() {
     const char * env = std::getenv("QWEN3_TTS_DEVICE");
     if (!env || env[0] == '\0') {
-        return -1; // first CUDA device
+        return -1; // first backend device
     }
 
     int parsed = -1;
     if (!parse_non_negative_int(env, parsed)) {
-        fprintf(stderr, "  [backend] Invalid QWEN3_TTS_DEVICE=%s, using default CUDA device\n", env);
+        fprintf(stderr, "  [backend] Invalid QWEN3_TTS_DEVICE=%s, using default device\n", env);
         return -1;
     }
     return parsed;
 }
 
-ggml_backend_t init_cuda_backend_from_env() {
-    const int target_cuda_idx = get_cuda_device_index_from_env();
-    int matched_cuda_devices = 0;
+ggml_backend_t init_named_backend_from_env(const char * target_backend_name) {
+    const int target_idx = get_backend_device_index_from_env();
+    int matched_devices = 0;
 
     const size_t n_devs = ggml_backend_dev_count();
     for (size_t i = 0; i < n_devs; ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
         const char * reg_name = reg ? ggml_backend_reg_name(reg) : nullptr;
-        if (!reg_name || !iequals(reg_name, "CUDA")) {
+        if (!reg_name || !iequals(reg_name, target_backend_name)) {
             continue;
         }
 
-        if (target_cuda_idx >= 0 && matched_cuda_devices != target_cuda_idx) {
-            matched_cuda_devices++;
+        if (target_idx >= 0 && matched_devices != target_idx) {
+            matched_devices++;
             continue;
         }
 
@@ -110,17 +114,26 @@ ggml_backend_t init_cuda_backend_from_env() {
             return backend;
         }
 
-        if (target_cuda_idx >= 0) {
+        if (target_idx >= 0) {
             break;
         }
-        matched_cuda_devices++;
+        matched_devices++;
     }
 
-    if (target_cuda_idx >= 0) {
-        fprintf(stderr, "  [backend] Requested CUDA device index %d not available\n", target_cuda_idx);
+    if (target_idx >= 0) {
+        fprintf(stderr, "  [backend] Requested %s device index %d not available\n",
+                target_backend_name, target_idx);
     }
 
     return nullptr;
+}
+
+ggml_backend_t init_cuda_backend_from_env() {
+    return init_named_backend_from_env("CUDA");
+}
+
+ggml_backend_t init_vulkan_backend_from_env() {
+    return init_named_backend_from_env("Vulkan");
 }
 
 ggml_backend_t init_tensor_loader_backend(enum ggml_backend_dev_type preferred_backend_type) {
@@ -135,6 +148,11 @@ ggml_backend_t init_tensor_loader_backend(enum ggml_backend_dev_type preferred_b
             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
         }
         return backend;
+    }
+    if (mode == backend_mode::VULKAN) {
+        // Vulkan tensor-loader allocation is less robust for some large models/backends.
+        // Keep weights in CPU buffer and let the runtime scheduler move/execute as needed.
+        return ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
     }
 
     ggml_backend_t backend = ggml_backend_init_by_type(preferred_backend_type, nullptr);
@@ -170,6 +188,12 @@ ggml_backend_t init_preferred_backend(const char * component_name, std::string *
             fprintf(stderr, "  [backend] CUDA requested but unavailable, falling back to CPU\n");
             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
         }
+    } else if (mode == backend_mode::VULKAN) {
+        backend = init_vulkan_backend_from_env();
+        if (!backend) {
+            fprintf(stderr, "  [backend] Vulkan requested but unavailable, falling back to CPU\n");
+            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        }
     } else {
         backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU, nullptr);
         if (!backend) {
@@ -186,7 +210,7 @@ ggml_backend_t init_preferred_backend(const char * component_name, std::string *
     if (!backend && error_msg) {
         const char * name = component_name ? component_name : "component";
         *error_msg = "Failed to initialize backend for " + std::string(name)
-            + " (QWEN3_TTS_BACKEND=auto|cpu|cuda)";
+            + " (QWEN3_TTS_BACKEND=auto|cpu|cuda|vulkan)";
     }
 
     if (backend) {
