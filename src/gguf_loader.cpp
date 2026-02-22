@@ -25,6 +25,7 @@ enum class backend_mode {
     AUTO,
     CPU,
     CUDA,
+    ROCM,
     VULKAN,
 };
 
@@ -68,6 +69,9 @@ backend_mode get_backend_mode_from_env() {
     }
     if (iequals(env, "cuda")) {
         return backend_mode::CUDA;
+    }
+    if (iequals(env, "rocm") || iequals(env, "hip") || iequals(env, "hipblas")) {
+        return backend_mode::ROCM;
     }
     if (iequals(env, "vulkan") || iequals(env, "vk")) {
         return backend_mode::VULKAN;
@@ -132,6 +136,10 @@ ggml_backend_t init_cuda_backend_from_env() {
     return init_named_backend_from_env("CUDA");
 }
 
+ggml_backend_t init_rocm_backend_from_env() {
+    return init_named_backend_from_env("ROCm");
+}
+
 ggml_backend_t init_vulkan_backend_from_env() {
     return init_named_backend_from_env("Vulkan");
 }
@@ -144,6 +152,13 @@ ggml_backend_t init_tensor_loader_backend(enum ggml_backend_dev_type preferred_b
     }
     if (mode == backend_mode::CUDA) {
         ggml_backend_t backend = init_cuda_backend_from_env();
+        if (!backend) {
+            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        }
+        return backend;
+    }
+    if (mode == backend_mode::ROCM) {
+        ggml_backend_t backend = init_rocm_backend_from_env();
         if (!backend) {
             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
         }
@@ -188,6 +203,12 @@ ggml_backend_t init_preferred_backend(const char * component_name, std::string *
             fprintf(stderr, "  [backend] CUDA requested but unavailable, falling back to CPU\n");
             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
         }
+    } else if (mode == backend_mode::ROCM) {
+        backend = init_rocm_backend_from_env();
+        if (!backend) {
+            fprintf(stderr, "  [backend] ROCm requested but unavailable, falling back to CPU\n");
+            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+        }
     } else if (mode == backend_mode::VULKAN) {
         backend = init_vulkan_backend_from_env();
         if (!backend) {
@@ -210,7 +231,7 @@ ggml_backend_t init_preferred_backend(const char * component_name, std::string *
     if (!backend && error_msg) {
         const char * name = component_name ? component_name : "component";
         *error_msg = "Failed to initialize backend for " + std::string(name)
-            + " (QWEN3_TTS_BACKEND=auto|cpu|cuda|vulkan)";
+            + " (QWEN3_TTS_BACKEND=auto|cpu|cuda|rocm|vulkan)";
     }
 
     if (backend) {
