@@ -946,11 +946,17 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
 
     ggml_backend_dev_t device = state_.backend ? ggml_backend_get_device(state_.backend) : nullptr;
     const bool primary_is_cpu = !device || ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_CPU;
+    bool primary_is_cuda = false;
+    if (device) {
+        ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(device);
+        const char * reg_name = reg ? ggml_backend_reg_name(reg) : nullptr;
+        primary_is_cuda = reg_name && strcmp(reg_name, "CUDA") == 0;
+    }
     const int32_t max_gpu_frames = get_env_i32("QWEN3_TTS_DECODER_GPU_MAX_FRAMES", 34);
     const int32_t context_frames_cfg = get_env_i32("QWEN3_TTS_DECODER_GPU_CONTEXT_FRAMES", 12);
 
-    // Fast path: CPU backend or request fully fits in one GPU decode chunk.
-    if (primary_is_cpu || max_gpu_frames <= 0 || n_frames <= max_gpu_frames) {
+    // Fast path: CPU backend, non-CUDA accelerators, or requests that fit one decode chunk.
+    if (primary_is_cpu || !primary_is_cuda || max_gpu_frames <= 0 || n_frames <= max_gpu_frames) {
         return decode_single(codes, n_frames, 0, samples);
     }
 
